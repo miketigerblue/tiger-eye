@@ -146,8 +146,8 @@ def test_normalise_ttps_plain_strings_wrapped():
         }
     )
     assert result["ttps"] == [
-        {"id": "", "name": "phishing"},
-        {"id": "", "name": "credential dumping"},
+        {"id": "T1566", "name": "phishing"},
+        {"id": "T1003", "name": "credential dumping"},
     ]
 
 

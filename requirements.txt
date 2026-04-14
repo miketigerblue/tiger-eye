@@ -1,0 +1,29 @@
+# Core
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic-settings>=2.0
+
+# Database
+sqlalchemy[asyncio]>=2.0
+asyncpg>=0.30.0
+pgvector>=0.3.0
+
+# LLM
+langchain-openai>=0.3.0
+openai>=1.60.0
+
+# Observability — structured logging
+structlog>=24.0.0
+
+# Observability — Prometheus metrics
+prometheus-client>=0.21.0
+
+# Observability — OpenTelemetry tracing
+opentelemetry-api>=1.25.0
+opentelemetry-sdk>=1.25.0
+opentelemetry-instrumentation-fastapi>=0.46b0
+opentelemetry-instrumentation-sqlalchemy>=0.46b0
+opentelemetry-exporter-otlp-proto-grpc>=1.25.0
+
+# Utilities
+python-dotenv>=1.0

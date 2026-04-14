@@ -1,0 +1,7 @@
+# ZAP baseline scan rule overrides
+# Format: rule_id	action	name
+# Actions: IGNORE, WARN, FAIL
+10035	IGNORE	Strict-Transport-Security Header Not Set
+10098	IGNORE	Cross-Domain Misconfiguration
+10049	IGNORE	Storable and Cacheable Content
+90033	IGNORE	Loosely Scoped Cookie

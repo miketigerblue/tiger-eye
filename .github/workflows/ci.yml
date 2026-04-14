@@ -1,0 +1,289 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # ---------- Stage 1: Fast checks (no Docker, no DB) ----------
+
+  lint:
+    name: Lint (Ruff + mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install tools
+        run: pip install ruff mypy
+      - name: Ruff check
+        run: ruff check tiger_eye/ tests/
+      - name: Ruff format check
+        run: ruff format --check tiger_eye/ tests/
+      - name: mypy
+        run: mypy tiger_eye/ --ignore-missing-imports
+
+  sast:
+    name: SAST (Bandit + Semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Bandit
+        run: |
+          pip install bandit[toml]
+          bandit -c pyproject.toml -r tiger_eye/ -f json -o bandit-report.json || true
+          bandit -c pyproject.toml -r tiger_eye/
+
+      - name: Upload Bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.json
+
+      - name: Semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/python
+            p/owasp-top-ten
+            p/security-audit
+            p/secrets
+          generateSarif: "1"
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+      - name: Upload Semgrep SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+        continue-on-error: true
+
+  dependency-audit:
+    name: Dependency Audit (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: pip-audit
+        run: |
+          pip install pip-audit
+          pip-audit --format json --output pip-audit-report.json || true
+          pip-audit
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-report
+          path: pip-audit-report.json
+
+  secret-scan:
+    name: Secret Scanning (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------- Stage 2: Unit + API tests (no Docker) ----------
+
+  unit-tests:
+    name: Unit + API Tests
+    needs: [lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio httpx pytest-cov
+      - name: Run unit + API tests with coverage
+        env:
+          OPENAI_API_KEY: "test-dummy-key"
+        run: |
+          pytest tests/test_analysis.py tests/test_api.py \
+            -v --tb=short \
+            --cov=tiger_eye --cov-report=xml --cov-report=term-missing
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+  # ---------- Stage 3: Integration tests (pgvector container) ----------
+
+  integration-tests:
+    name: Integration Tests (pgvector)
+    needs: [unit-tests]
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: tiger
+          POSTGRES_PASSWORD: tiger
+          POSTGRES_DB: tiger2go_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U tiger -d tiger2go_test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio httpx
+      - name: Run migrations
+        env:
+          DATABASE_URL: "postgresql+asyncpg://tiger:tiger@localhost:5432/tiger2go_test"
+          OPENAI_API_KEY: "test-dummy-key"
+        run: python -m tiger_eye.migrate
+      - name: Run integration tests
+        env:
+          DATABASE_URL: "postgresql+asyncpg://tiger:tiger@localhost:5432/tiger2go_test"
+          OPENAI_API_KEY: "test-dummy-key"
+        run: pytest tests/test_integration.py -v --tb=short
+
+  # ---------- Stage 4: Container build + scan ----------
+
+  container-scan:
+    name: Container Build + Trivy Scan
+    needs: [unit-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t tiger-eye:ci .
+
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: "tiger-eye:ci"
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "CRITICAL,HIGH"
+          exit-code: "0"
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+        continue-on-error: true
+
+      - name: Trivy table output (for PR comment)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: "tiger-eye:ci"
+          format: "table"
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+
+      - name: Generate SBOM
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: "tiger-eye:ci"
+          format: "cyclonedx"
+          output: "sbom.json"
+
+      - name: Upload SBOM
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json
+
+  # ---------- Stage 5: DAST (against running container) ----------
+
+  dast:
+    name: DAST (ZAP Baseline)
+    needs: [container-scan]
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: tiger
+          POSTGRES_PASSWORD: tiger
+          POSTGRES_DB: tiger2go_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U tiger -d tiger2go_test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install deps + run migrations
+        env:
+          DATABASE_URL: "postgresql+asyncpg://tiger:tiger@localhost:5432/tiger2go_test"
+          OPENAI_API_KEY: "test-dummy-key"
+        run: |
+          pip install -r requirements.txt
+          python -m tiger_eye.migrate
+
+      - name: Start tiger-eye in background
+        env:
+          DATABASE_URL: "postgresql+asyncpg://tiger:tiger@localhost:5432/tiger2go_test"
+          OPENAI_API_KEY: "test-dummy-key"
+          ENRICH_INTERVAL: "9999"
+        run: |
+          python -m tiger_eye.main &
+          sleep 5
+          curl -f http://localhost:8080/health
+
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: "http://localhost:8080"
+          rules_file_name: ".zap-rules.tsv"
+          cmd_options: "-a -j"
+          allow_issue_writing: false
+
+      - name: Upload ZAP report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: report_html.html

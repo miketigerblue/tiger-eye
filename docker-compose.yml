@@ -1,0 +1,19 @@
+# tiger-eye enricher
+# Joins tiger2go_net to read from the same Postgres as tigerfetch
+
+networks:
+  tiger2go_net:
+    external: true
+    name: tiger2go_tiger2go_net
+
+services:
+  tiger-eye:
+    build: .
+    container_name: tiger-eye
+    env_file: .env
+    ports:
+      - "8080:8080"
+    depends_on: []
+    networks:
+      - tiger2go_net
+    restart: unless-stopped

@@ -1,0 +1,35 @@
+# tiger-eye integration test harness
+# Usage: docker compose -f docker-compose.test.yml up --build --abort-on-container-exit
+#
+# Spins up Postgres + pgvector, runs migrations, then runs the integration test suite.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: tiger
+      POSTGRES_PASSWORD: tiger
+      POSTGRES_DB: tiger2go_test
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tiger -d tiger2go_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  test-runner:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://tiger:tiger@postgres:5432/tiger2go_test"
+      OPENAI_API_KEY: "test-dummy-key"
+      LOG_JSON: "false"
+    entrypoint: >
+      sh -c "
+        pip install pytest pytest-asyncio httpx &&
+        python -m tiger_eye.migrate &&
+        python -m pytest tests/ -v --tb=short
+      "

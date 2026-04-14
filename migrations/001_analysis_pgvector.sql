@@ -4,7 +4,8 @@
 -- Requires pgvector extension (must be enabled by superuser if not already).
 -- Run against the tiger2go database.
 
--- Enable pgvector
+-- Enable required extensions
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS vector;
 
 -- Analysis table — LLM-enriched threat assessments

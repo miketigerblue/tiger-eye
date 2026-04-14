@@ -11,6 +11,22 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _clear_db_caches():
+    """Clear lru_cache singletons so each test gets a fresh engine/session factory.
+
+    Prevents 'Future attached to a different loop' errors when pytest-asyncio
+    creates a new event loop per test.
+    """
+    from tiger_eye.database import _get_engine, _get_session_factory
+
+    _get_engine.cache_clear()
+    _get_session_factory.cache_clear()
+    yield
+    _get_engine.cache_clear()
+    _get_session_factory.cache_clear()
+
+
 @pytest.fixture
 def mock_entry():
     """Factory for fake ArchiveEntry-like objects."""

@@ -55,6 +55,75 @@ VALID_THREAT_TYPES = {
 
 VALID_SEVERITIES = {"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL"}
 
+# Fallback lookup: TTP name -> ATT&CK ID (normalised lowercase key)
+# Used when the LLM returns a name but no ID.
+_TTP_NAME_TO_ID: dict[str, str] = {
+    "exploit public-facing application": "T1190",
+    "drive-by compromise": "T1189",
+    "supply chain compromise": "T1195",
+    "phishing": "T1566",
+    "spearphishing attachment": "T1566.001",
+    "spearphishing link": "T1566.002",
+    "spearphishing via service": "T1566.003",
+    "command and scripting interpreter": "T1059",
+    "powershell": "T1059.001",
+    "windows command shell": "T1059.003",
+    "python": "T1059.006",
+    "javascript": "T1059.007",
+    "valid accounts": "T1078",
+    "scheduled task/job": "T1053",
+    "boot or logon autostart execution": "T1547",
+    "os credential dumping": "T1003",
+    "credential dumping": "T1003",
+    "credential theft": "T1003",
+    "credential harvesting": "T1003",
+    "application layer protocol": "T1071",
+    "remote services": "T1021",
+    "rdp": "T1021.001",
+    "smb/windows admin shares": "T1021.002",
+    "vnc": "T1021.005",
+    "data encrypted for impact": "T1486",
+    "endpoint denial of service": "T1499",
+    "denial of service": "T1499",
+    "network denial of service": "T1498",
+    "adversary-in-the-middle": "T1557",
+    "obfuscated files or information": "T1027",
+    "masquerading": "T1036",
+    "user execution": "T1204",
+    "user execution: malicious link": "T1204.001",
+    "user execution: malicious file": "T1204.002",
+    "process injection": "T1055",
+    "exploitation for privilege escalation": "T1068",
+    "privilege escalation": "T1068",
+    "local privilege escalation": "T1068",
+    "exploitation for client execution": "T1203",
+    "exploitation of remote services": "T1210",
+    "external remote services": "T1133",
+    "exfiltration over alternative protocol": "T1048",
+    "exfiltration over web service": "T1567",
+    "data exfiltration": "T1048",
+    "dynamic resolution": "T1568",
+    "fast flux dns": "T1568.001",
+    "ingress tool transfer": "T1105",
+    "non-standard port": "T1571",
+    "remote access software": "T1219",
+    "lateral movement": "T1021",
+    "persistence": "T1547",
+    "social engineering": "T1566",
+    "extortion": "T1486",
+    # CWE-style names the LLM commonly returns — map to closest ATT&CK
+    "sql injection": "T1190",
+    "remote code execution": "T1210",
+    "arbitrary code execution": "T1203",
+    "cross-site scripting": "T1059.007",
+    "cross-site scripting (xss)": "T1059.007",
+    "authentication bypass": "T1078",
+    "information disclosure": "T1005",
+    "deserialization of untrusted data": "T1190",
+    "container escape": "T1611",
+    "prompt injection": "T1059",
+}
+
 ANALYSIS_PROMPT = """You are a senior threat intelligence analyst. Analyse the following
 OSINT feed entry and produce a structured threat assessment.
 
@@ -108,8 +177,44 @@ Produce a JSON object with exactly these fields:
 - cve_references: array of CVE IDs mentioned (e.g. "CVE-2024-1234"). Include
   any exploit advisory URLs as separate entries in this array.
 - ttps: array of MITRE ATT&CK techniques as objects with "id" and "name" fields.
+  The "id" field is REQUIRED — always provide the ATT&CK technique ID (e.g. T1190).
   Example: [{{"id": "T1566.001", "name": "Spearphishing Attachment"}}]
-  If you can identify the technique but not the exact ID, use "name" only.
+  Common mappings for reference (use sub-technique IDs where applicable):
+    T1190 Exploit Public-Facing Application
+    T1189 Drive-by Compromise
+    T1195 Supply Chain Compromise  (T1195.001 Software, T1195.002 Hardware)
+    T1566 Phishing  (T1566.001 Attachment, T1566.002 Link, T1566.003 Spearphishing via Service)
+    T1059 Command and Scripting Interpreter  (T1059.001 PowerShell, T1059.003 Cmd, T1059.006 Python)
+    T1078 Valid Accounts
+    T1053 Scheduled Task/Job
+    T1547 Boot or Logon Autostart Execution
+    T1003 OS Credential Dumping
+    T1071 Application Layer Protocol
+    T1021 Remote Services  (T1021.001 RDP, T1021.002 SMB, T1021.005 VNC)
+    T1486 Data Encrypted for Impact (ransomware)
+    T1499 Endpoint Denial of Service
+    T1498 Network Denial of Service
+    T1557 Adversary-in-the-Middle
+    T1027 Obfuscated Files or Information
+    T1036 Masquerading
+    T1204 User Execution  (T1204.001 Malicious Link, T1204.002 Malicious File)
+    T1047 Windows Management Instrumentation
+    T1055 Process Injection
+    T1068 Exploitation for Privilege Escalation
+    T1203 Exploitation for Client Execution
+    T1210 Exploitation of Remote Services
+    T1133 External Remote Services
+    T1048 Exfiltration Over Alternative Protocol
+    T1567 Exfiltration Over Web Service
+    T1568 Dynamic Resolution  (T1568.001 Fast Flux DNS)
+    T1105 Ingress Tool Transfer
+    T1571 Non-Standard Port
+    T1219 Remote Access Software
+  Do NOT use generic vulnerability class names like "SQL Injection", "XSS",
+  "Remote Code Execution", "Authentication Bypass", or "Information Disclosure"
+  as TTP names — these are CWE categories, not ATT&CK techniques. Instead, map
+  them to the closest ATT&CK technique (e.g. SQL Injection -> T1190, RCE -> T1203
+  or T1210 depending on vector, Privesc -> T1068, XSS -> T1059.007).
 - tools_used: array of tools/frameworks mentioned (Cobalt Strike, Mimikatz, etc)
 - malware_families: array of malware families mentioned (Emotet, LockBit, etc)
 - target_geographies: array of targeted countries/regions
@@ -189,20 +294,21 @@ def normalise_analysis(result: dict) -> dict:
     else:
         result["key_iocs"] = []
 
-    # ttps — ensure list of {"id": ..., "name": ...} dicts
+    # ttps — ensure list of {"id": ..., "name": ...} dicts, auto-fill IDs
     raw_ttps = result.get("ttps")
     if isinstance(raw_ttps, list):
         cleaned = []
         for item in raw_ttps:
             if isinstance(item, dict):
-                cleaned.append(
-                    {
-                        "id": str(item.get("id", "")),
-                        "name": str(item.get("name", "")),
-                    }
-                )
+                tid = str(item.get("id", "")).strip()
+                name = str(item.get("name", "")).strip()
+                # Auto-fill missing IDs from the lookup table
+                if not tid and name:
+                    tid = _TTP_NAME_TO_ID.get(name.lower(), "")
+                cleaned.append({"id": tid, "name": name})
             elif isinstance(item, str) and item:
-                cleaned.append({"id": "", "name": item})
+                tid = _TTP_NAME_TO_ID.get(item.strip().lower(), "")
+                cleaned.append({"id": tid, "name": item})
         result["ttps"] = cleaned
     else:
         result["ttps"] = []

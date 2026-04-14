@@ -44,7 +44,7 @@ async def generate_embedding(
             t0 = time.monotonic()
             response = await client.embeddings.create(input=text, model=model)
             EMBEDDING_LATENCY.observe(time.monotonic() - t0)
-            return response.data[0].embedding
+            return list(response.data[0].embedding)
         except (openai.RateLimitError, openai.APIStatusError) as exc:
             last_err = exc
             if attempt < _MAX_RETRIES:
@@ -59,7 +59,7 @@ async def generate_embedding(
                 await asyncio.sleep(delay)
             else:
                 raise
-    raise last_err  # unreachable, but satisfies type checker
+    raise last_err if last_err is not None else RuntimeError("unreachable")
 
 
 def build_embedding_text(

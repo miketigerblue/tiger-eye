@@ -313,6 +313,9 @@ async def analyse_and_persist(entry: ArchiveEntry) -> AnalysisEntry | None:
                     return None
 
         # 4. Normalise
+        if result is None:
+            ENTRIES_FAILED.labels(stage="llm").inc()
+            return None
         result = normalise_analysis(result)
 
         # 5. Build embedding text and generate vector

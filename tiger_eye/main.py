@@ -46,7 +46,7 @@ _CONCURRENCY = 5  # max parallel enrichment tasks per batch
 
 def _backoff_delay() -> float:
     """Exponential backoff: 2^failures seconds, capped at _MAX_BACKOFF."""
-    return min(2**_consecutive_failures, _MAX_BACKOFF)
+    return float(min(2**_consecutive_failures, _MAX_BACKOFF))
 
 
 # ---------------------------------------------------------------------------
@@ -126,8 +126,8 @@ async def enrichment_loop():
                     elif r is not None:
                         enriched += 1
                         ENTRIES_ENRICHED.labels(
-                            threat_type=r.threat_type or "UNKNOWN",
-                            severity_level=r.severity_level or "UNKNOWN",
+                            threat_type=getattr(r, "threat_type", None) or "UNKNOWN",
+                            severity_level=getattr(r, "severity_level", None) or "UNKNOWN",
                         ).inc()
                     else:
                         failures += 1

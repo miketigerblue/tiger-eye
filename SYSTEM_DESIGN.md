@@ -630,6 +630,11 @@ A provisioned dashboard (`grafana/dashboards/tiger-eye.json`) provides 16 panels
 | **OpenAI Latency** | LLM p50/p95/p99, embedding p50/p95/p99, retry rate, backoff streak timeline |
 | **RAG Pipeline** | Query volume, hit rate gauge (0-100%), threat type donut chart |
 
+<p align="center">
+  <img src="grafana-1.png" alt="Grafana — Overview and Enrichment Pipeline rows" width="800"><br>
+  <img src="grafana-2.png" alt="Grafana — OpenAI Latency and RAG Pipeline rows" width="800">
+</p>
+
 ### 10.4 Structured logging
 
 All log output is JSON-formatted via structlog, with consistent fields:
@@ -960,15 +965,15 @@ No Prometheus:    Metrics exposed but not scraped                (always)
 
 ## Appendix C: Live System Snapshot
 
-*Captured 2026-04-14 while tiger-eye is actively enriching against the tiger2go dev stack.*
+*Updated 2026-04-15 — tiger-eye fully caught up against the tiger2go dev stack.*
 
 ### Pipeline health
 
 ```json
 {
   "status": "ok",
-  "analyses": 120,
-  "embeddings": 120,
+  "analyses": 1405,
+  "embeddings": 1405,
   "loop_running": true,
   "consecutive_failures": 0
 }
@@ -978,37 +983,45 @@ No Prometheus:    Metrics exposed but not scraped                (always)
 
 | Table | Records | Notes |
 |-------|---------|-------|
-| `archive` | 1,352 | Feed entries from 20+ sources |
-| `analysis` | 120 | 8.9% enriched (processing in progress) |
-| `analysis_embedding` | 120 | 100% of analyses have embeddings |
-| `cve_enriched` | 344,560 | NVD vulnerability data |
-| `epss_daily` | ~2.7M | Partitioned by month (March + April 2026) |
+| `archive` | 1,406 | Feed entries from 20+ sources |
+| `analysis` | 1,405 | 99.9% enriched (1 entry gap closed) |
+| `analysis_embedding` | 1,405 | 100% of analyses have embeddings |
+| `cve_enriched` | 344,664 | NVD vulnerability data |
+| `epss_daily` | ~3.2M | Partitioned by month (March + April 2026) |
 
-### Enrichment distribution (live)
+### Enrichment distribution
 
 **By threat type:**
 
 | Threat Type | Count | Avg Confidence |
 |-------------|-------|----------------|
-| VULNERABILITY | 80 | 85 |
-| INFORMATIONAL | 32 | 14 |
-| APT_CAMPAIGN | 9 | 85 |
-| RANSOMWARE | 3 | 95 |
-| MALWARE | 1 | 94 |
+| INFORMATIONAL | 689 | 13 |
+| VULNERABILITY | 462 | 87 |
+| APT_CAMPAIGN | 67 | 83 |
+| MALWARE | 50 | 77 |
+| SUPPLY_CHAIN | 49 | 86 |
+| DATA_BREACH | 31 | 75 |
+| RANSOMWARE | 31 | 86 |
+| OTHER | 12 | 52 |
+| POLICY | 8 | 18 |
+| DDOS | 6 | 87 |
 
 **By severity:**
 
-| Severity | Count |
-|----------|-------|
-| HIGH | 39 |
-| INFORMATIONAL | 32 |
-| MEDIUM | 30 |
-| LOW | 17 |
-| CRITICAL | 7 |
+| Severity | Count | Avg Confidence |
+|----------|-------|----------------|
+| CRITICAL | 35 | 96 |
+| HIGH | 287 | 87 |
+| MEDIUM | 295 | 86 |
+| LOW | 73 | 74 |
+| INFORMATIONAL | 715 | 14 |
 
 ### Observations
 
-1. The model correctly assigns low confidence (avg 14) to INFORMATIONAL entries -- the grounding rules in the prompt are working
-2. High-confidence entries (85-95) cluster around VULNERABILITY, APT_CAMPAIGN, and RANSOMWARE -- the most concrete threat types
-3. 100% embedding coverage confirms the full pipeline (LLM + embedding + persist) is operational end-to-end
-4. Zero consecutive failures indicates stable connectivity to both PostgreSQL and OpenAI APIs
+1. The model correctly assigns low confidence (avg 13-14) to INFORMATIONAL entries -- the grounding rules in the prompt are working
+2. CRITICAL entries have the highest average confidence (96) -- the model is most certain when the threat is most severe
+3. Confidence and severity are well-correlated: CRITICAL 96, HIGH 87, MEDIUM 86, LOW 74, INFORMATIONAL 14
+4. 100% embedding coverage confirms the full pipeline (LLM + embedding + persist) is operational end-to-end
+5. Zero consecutive failures indicates stable connectivity to both PostgreSQL and OpenAI APIs
+6. All 10 threat type categories are populated, with VULNERABILITY (33%) and INFORMATIONAL (49%) dominating as expected for a mixed news/advisory/intel feed
+7. ATT&CK TTP ID coverage: 74% on historical entries (post-backfill), 100% on new entries via the 260-entry normaliser lookup table

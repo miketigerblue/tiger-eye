@@ -13,7 +13,7 @@ responsibly.
 
 **Do NOT open a public GitHub issue for security vulnerabilities.**
 
-Instead, please email **security@mikeharris.dev** with:
+Instead, please email **security@tigerblue.tech** with:
 
 1. A description of the vulnerability
 2. Steps to reproduce

@@ -13,14 +13,17 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from prometheus_client import make_asgi_app as prometheus_asgi_app
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from datetime import UTC, datetime
 
-from tiger_eye.analysis import analyse_and_persist
+from sqlalchemy import and_, func, or_, select
+
+from tiger_eye.analysis import DLQ_MAX_ATTEMPTS, analyse_and_persist
 from tiger_eye.config import get_settings
 from tiger_eye.database import (
     AnalysisEmbedding,
     AnalysisEntry,
     ArchiveEntry,
+    FailedEnrichment,
     _get_engine,
     get_db,
 )
@@ -28,6 +31,7 @@ from tiger_eye.logging_config import configure_logging
 from tiger_eye.metrics import (
     BACKOFF_STREAK,
     BATCH_SIZE,
+    DLQ_DEPTH,
     ENTRIES_ENRICHED,
     ENTRIES_FAILED,
     LOOP_RUNNING,
@@ -83,10 +87,25 @@ async def enrichment_loop():
     while True:
         try:
             async with get_db() as db:
+                # Pick up entries that:
+                #   - have no AnalysisEntry yet, AND
+                #   - either aren't in the DLQ, OR are in it but eligible for retry:
+                #       attempts < DLQ_MAX_ATTEMPTS AND next_retry_at <= now()
+                now = datetime.now(UTC)
                 stmt = (
                     select(ArchiveEntry)
                     .outerjoin(AnalysisEntry, AnalysisEntry.guid == ArchiveEntry.guid)
+                    .outerjoin(FailedEnrichment, FailedEnrichment.guid == ArchiveEntry.guid)
                     .where(AnalysisEntry.guid.is_(None))
+                    .where(
+                        or_(
+                            FailedEnrichment.guid.is_(None),
+                            and_(
+                                FailedEnrichment.attempts < DLQ_MAX_ATTEMPTS,
+                                FailedEnrichment.next_retry_at <= now,
+                            ),
+                        )
+                    )
                     .order_by(ArchiveEntry.inserted_at.asc())
                     .limit(s.enrich_batch_size)
                 )
@@ -213,13 +232,30 @@ async def health():
             embed_count = result.scalar() or 0
             result = await db.execute(select(func.count()).select_from(AnalysisEntry))
             analysis_count = result.scalar() or 0
+            result = await db.execute(
+                select(func.count())
+                .select_from(FailedEnrichment)
+                .where(FailedEnrichment.attempts < DLQ_MAX_ATTEMPTS)
+            )
+            dlq_retryable = result.scalar() or 0
+            result = await db.execute(
+                select(func.count())
+                .select_from(FailedEnrichment)
+                .where(FailedEnrichment.attempts >= DLQ_MAX_ATTEMPTS)
+            )
+            dlq_exhausted = result.scalar() or 0
     except Exception as exc:
         raise HTTPException(status_code=503, detail="database unavailable") from exc
+
+    DLQ_DEPTH.labels(status="retryable").set(dlq_retryable)
+    DLQ_DEPTH.labels(status="exhausted").set(dlq_exhausted)
 
     return {
         "status": "ok",
         "analyses": analysis_count,
         "embeddings": embed_count,
+        "dlq_retryable": dlq_retryable,
+        "dlq_exhausted": dlq_exhausted,
         "loop_running": _loop_task is not None and not _loop_task.done(),
         "consecutive_failures": _consecutive_failures,
     }

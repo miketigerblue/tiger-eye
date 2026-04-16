@@ -8,16 +8,19 @@ import contextlib
 import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import UUID
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from prometheus_client import make_asgi_app as prometheus_asgi_app
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 
 from tiger_eye.analysis import DLQ_MAX_ATTEMPTS, analyse_and_persist
 from tiger_eye.config import get_settings
+from tiger_eye.dashboard_queries import get_dashboard_data
 from tiger_eye.database import (
     AnalysisEmbedding,
     AnalysisEntry,
@@ -217,6 +220,9 @@ instrument_app(app)
 metrics_app = prometheus_asgi_app()
 app.mount("/metrics", metrics_app)
 
+# Path to the packaged dashboard HTML (served by GET /dashboard).
+_DASHBOARD_HTML = Path(__file__).resolve().parent / "static" / "dashboard.html"
+
 
 # ---------------------------------------------------------------------------
 # API endpoints
@@ -268,6 +274,24 @@ async def api_search_vector(query: VectorSearchQuery):
     with tracer.start_as_current_span("search_by_vector"):
         results = await search_by_vector(query.embeddings, query.n_results)
     return {"results": results}
+
+
+@app.get("/dashboard", include_in_schema=False)
+async def dashboard_page():
+    """Serve the tiger-eye threat intelligence console (static HTML)."""
+    if not _DASHBOARD_HTML.exists():
+        raise HTTPException(status_code=500, detail="dashboard template missing")
+    return FileResponse(_DASHBOARD_HTML, media_type="text/html")
+
+
+@app.get("/api/dashboard")
+async def api_dashboard(refresh: int = 0):
+    """Aggregated JSON payload powering every panel on /dashboard.
+
+    Results are cached for ~60s server-side. Pass ?refresh=1 to force a rebuild.
+    """
+    with tracer.start_as_current_span("dashboard_data", attributes={"refresh": bool(refresh)}):
+        return await get_dashboard_data(force_refresh=bool(refresh))
 
 
 @app.get("/internal/node/{node_id}")

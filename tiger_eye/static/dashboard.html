@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>TIGER-EYE // Threat Intelligence Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1"></script>
+<style>
+    :root {
+        --bg: #0a0e14;
+        --bg-elev-1: #0f141c;
+        --bg-elev-2: #151b25;
+        --bg-elev-3: #1c2430;
+        --border: #202938;
+        --border-bright: #2d3a4d;
+        --text: #c9d1d9;
+        --text-dim: #8b949e;
+        --text-faint: #586069;
+        --accent: #ff8800;
+        --accent-dim: #ff880033;
+        --accent-bright: #ffaa33;
+
+        --crit: #ff3b52;
+        --high: #ff8800;
+        --med:  #ffc233;
+        --low:  #4f9cff;
+        --info: #6b7280;
+
+        --grid: #1a2030;
+        --scan-line: rgba(255, 136, 0, 0.03);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 13px;
+        line-height: 1.45;
+        min-height: 100vh;
+        background-image:
+            linear-gradient(180deg, var(--scan-line) 50%, transparent 50%),
+            radial-gradient(ellipse at top, rgba(255, 136, 0, 0.04), transparent 70%);
+        background-size: 100% 4px, 100% 100%;
+    }
+
+    .mono { font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; }
+
+    /* ======================= HEADER ======================= */
+    .top-bar {
+        position: sticky;
+        top: 0;
+        background: linear-gradient(180deg, var(--bg-elev-2), var(--bg-elev-1));
+        border-bottom: 1px solid var(--border-bright);
+        padding: 14px 28px;
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        z-index: 10;
+        backdrop-filter: blur(6px);
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-mark {
+        width: 28px; height: 28px;
+        border: 1.5px solid var(--accent);
+        border-radius: 50%;
+        display: grid; place-items: center;
+        position: relative;
+        box-shadow: 0 0 12px var(--accent-dim), inset 0 0 6px var(--accent-dim);
+    }
+    .brand-mark::before {
+        content: '';
+        width: 8px; height: 8px;
+        background: var(--accent);
+        border-radius: 50%;
+        box-shadow: 0 0 8px var(--accent);
+    }
+    .brand-mark::after {
+        content: '';
+        position: absolute;
+        inset: -4px;
+        border: 1px solid var(--accent-dim);
+        border-radius: 50%;
+        animation: pulse 3s infinite;
+    }
+    @keyframes pulse {
+        0%, 100% { transform: scale(1); opacity: 0.6; }
+        50% { transform: scale(1.15); opacity: 0; }
+    }
+    .brand-text .title {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0.15em;
+        color: var(--accent);
+    }
+    .brand-text .subtitle {
+        font-size: 11px;
+        color: var(--text-dim);
+        letter-spacing: 0.05em;
+    }
+
+    .top-meta {
+        margin-left: auto;
+        display: flex;
+        gap: 28px;
+        align-items: center;
+    }
+    .meta-item { display: flex; flex-direction: column; gap: 1px; }
+    .meta-label {
+        font-size: 10px;
+        color: var(--text-faint);
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+    }
+    .meta-value {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 12px;
+        color: var(--text);
+        font-weight: 500;
+    }
+    .status-dot {
+        display: inline-block;
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        background: #32d65a;
+        box-shadow: 0 0 8px #32d65a;
+        margin-right: 6px;
+        animation: blink 2s infinite;
+    }
+    .status-dot.err { background: #ff3b52; box-shadow: 0 0 8px #ff3b52; }
+    .status-dot.warn { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+    .refresh-btn {
+        background: transparent;
+        border: 1px solid var(--border-bright);
+        color: var(--text-dim);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        padding: 6px 12px;
+        cursor: pointer;
+        border-radius: 2px;
+        transition: all 0.15s ease;
+    }
+    .refresh-btn:hover:not(:disabled) {
+        color: var(--accent);
+        border-color: var(--accent);
+    }
+    .refresh-btn:disabled { opacity: 0.5; cursor: default; }
+    .refresh-btn.spinning { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ======================= LAYOUT ======================= */
+    .container {
+        max-width: 1600px;
+        margin: 0 auto;
+        padding: 24px 28px 48px;
+    }
+
+    /* ======================= KPI ======================= */
+    .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin-bottom: 28px;
+    }
+    .kpi {
+        background: var(--bg-elev-1);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 18px 20px;
+        position: relative;
+        overflow: hidden;
+    }
+    .kpi::before {
+        content: '';
+        position: absolute;
+        left: 0; top: 0; bottom: 0;
+        width: 3px;
+        background: var(--accent);
+    }
+    .kpi.crit::before { background: var(--crit); }
+    .kpi.epss::before { background: var(--high); }
+    .kpi-label {
+        font-size: 10px;
+        color: var(--text-faint);
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+    }
+    .kpi-value {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 32px;
+        font-weight: 500;
+        color: var(--text);
+        line-height: 1;
+        margin-bottom: 6px;
+    }
+    .kpi.crit .kpi-value { color: var(--crit); }
+    .kpi.epss .kpi-value { color: var(--high); }
+    .kpi-sub {
+        font-size: 11px;
+        color: var(--text-dim);
+        font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* ======================= MAIN GRID ======================= */
+    .main-grid {
+        display: grid;
+        grid-template-columns: 1.4fr 1fr;
+        gap: 20px;
+        margin-bottom: 28px;
+    }
+    @media (max-width: 1200px) {
+        .main-grid { grid-template-columns: 1fr; }
+        .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+        .top-meta { gap: 16px; }
+    }
+
+    .panel {
+        background: var(--bg-elev-1);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 18px 20px;
+    }
+    .panel-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 16px;
+        padding-bottom: 12px;
+        border-bottom: 1px dashed var(--border);
+    }
+    .panel-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+        letter-spacing: 0.02em;
+    }
+    .panel-tag {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        color: var(--text-faint);
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+    }
+    .panel-footer {
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px dashed var(--border);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        color: var(--text-faint);
+        letter-spacing: 0.08em;
+    }
+
+    .chart-holder { position: relative; height: 280px; }
+    .chart-holder.tall { height: 360px; }
+    .chart-holder.short { height: 200px; }
+
+    .two-col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+    }
+
+    /* ======================= CVE TABLE ======================= */
+    .cve-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 12px;
+    }
+    .cve-table thead th {
+        text-align: left;
+        font-weight: 500;
+        font-size: 10px;
+        color: var(--text-faint);
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border-bright);
+    }
+    .cve-table tbody td {
+        padding: 9px 10px;
+        border-bottom: 1px solid var(--border);
+    }
+    .cve-table tbody tr:hover { background: var(--bg-elev-2); }
+    .cve-id { color: var(--accent); font-weight: 500; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+    .bar-cell { min-width: 120px; }
+    .mini-bar {
+        position: relative;
+        height: 4px;
+        background: var(--bg-elev-3);
+        border-radius: 2px;
+        overflow: hidden;
+    }
+    .mini-bar > span {
+        position: absolute;
+        left: 0; top: 0; bottom: 0;
+        background: var(--accent);
+        border-radius: 2px;
+        box-shadow: 0 0 6px var(--accent-dim);
+    }
+
+    /* ======================= SEV PILLS ======================= */
+    .sev {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 2px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    .sev.CRITICAL     { background: #3a0c14; color: var(--crit); border: 1px solid #6a1a28; }
+    .sev.HIGH         { background: #3a220a; color: var(--high); border: 1px solid #6a3f14; }
+    .sev.MEDIUM       { background: #3a320a; color: var(--med);  border: 1px solid #6a5a14; }
+    .sev.LOW          { background: #0a223a; color: var(--low);  border: 1px solid #14406a; }
+    .sev.INFORMATIONAL{ background: #1a1f2a; color: var(--info); border: 1px solid #2a3040; }
+
+    /* ======================= FEED ======================= */
+    .feed { max-height: 560px; overflow-y: auto; padding-right: 4px; }
+    .feed::-webkit-scrollbar { width: 6px; }
+    .feed::-webkit-scrollbar-track { background: var(--bg-elev-1); }
+    .feed::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+    .feed::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
+
+    .feed-item {
+        border-bottom: 1px solid var(--border);
+        padding: 14px 4px 14px 14px;
+        position: relative;
+    }
+    .feed-item:last-child { border-bottom: none; }
+    .feed-item::before {
+        content: '';
+        position: absolute;
+        left: 0; top: 16px; bottom: 16px;
+        width: 2px;
+        background: var(--border-bright);
+        border-radius: 1px;
+    }
+    .feed-item.CRITICAL::before { background: var(--crit); box-shadow: 0 0 6px var(--crit); }
+    .feed-item.HIGH::before { background: var(--high); }
+
+    .feed-meta {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 6px;
+        flex-wrap: wrap;
+    }
+    .feed-time {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        color: var(--text-faint);
+    }
+    .feed-source {
+        font-size: 10px;
+        color: var(--text-dim);
+        font-family: 'JetBrains Mono', monospace;
+    }
+    .feed-conf {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        color: var(--accent);
+        letter-spacing: 0.08em;
+    }
+    .feed-title {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text);
+        margin-bottom: 4px;
+        line-height: 1.35;
+    }
+    .feed-title a { color: inherit; text-decoration: none; }
+    .feed-title a:hover { color: var(--accent); }
+    .feed-summary {
+        font-size: 11.5px;
+        color: var(--text-dim);
+        line-height: 1.5;
+    }
+
+    /* ======================= LIST BARS ======================= */
+    .list-bars { display: flex; flex-direction: column; gap: 8px; }
+    .list-bar {
+        display: grid;
+        grid-template-columns: 160px 1fr 36px;
+        gap: 10px;
+        align-items: center;
+        font-size: 11.5px;
+    }
+    .list-bar .name {
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .list-bar .bar {
+        position: relative;
+        height: 10px;
+        background: var(--bg-elev-3);
+        border-radius: 2px;
+        overflow: hidden;
+    }
+    .list-bar .bar > span {
+        position: absolute;
+        left: 0; top: 0; bottom: 0;
+        background: linear-gradient(90deg, var(--accent), var(--accent-bright));
+        border-radius: 2px;
+        box-shadow: 0 0 4px var(--accent-dim);
+    }
+    .list-bar .count {
+        text-align: right;
+        font-family: 'JetBrains Mono', monospace;
+        color: var(--text-dim);
+    }
+
+    /* ======================= TABS ======================= */
+    .tabs {
+        display: flex;
+        gap: 0;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 16px;
+    }
+    .tab {
+        padding: 8px 14px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        user-select: none;
+    }
+    .tab.active {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+    }
+    .tab:hover:not(.active) { color: var(--text); }
+
+    /* ======================= LOADING ======================= */
+    .loading-overlay {
+        position: fixed;
+        inset: 0;
+        background: var(--bg);
+        display: grid;
+        place-items: center;
+        z-index: 100;
+        transition: opacity 0.3s ease;
+    }
+    .loading-overlay.hidden { opacity: 0; pointer-events: none; }
+    .loading-inner {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 12px;
+        color: var(--accent);
+        letter-spacing: 0.2em;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+    }
+    .loading-inner::before {
+        content: '';
+        width: 32px; height: 32px;
+        border: 2px solid var(--accent-dim);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+    }
+    .loading-error {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 12px;
+        color: var(--crit);
+        max-width: 520px;
+        text-align: center;
+        line-height: 1.6;
+    }
+
+    /* ======================= FOOTER ======================= */
+    .foot-note {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        color: var(--text-faint);
+        text-align: center;
+        padding-top: 24px;
+        letter-spacing: 0.1em;
+    }
+</style>
+</head>
+<body>
+<div class="loading-overlay" id="loading">
+    <div class="loading-inner" id="loading-inner">LOADING DASHBOARD</div>
+</div>
+
+<header class="top-bar">
+    <div class="brand">
+        <div class="brand-mark"></div>
+        <div class="brand-text">
+            <div class="title">TIGER-EYE</div>
+            <div class="subtitle">THREAT INTELLIGENCE CONSOLE // v0.3</div>
+        </div>
+    </div>
+    <div class="top-meta">
+        <div class="meta-item">
+            <span class="meta-label">Status</span>
+            <span class="meta-value"><span class="status-dot" id="status-dot"></span><span id="status-text">CONNECTED</span></span>
+        </div>
+        <div class="meta-item">
+            <span class="meta-label">Last Analysis</span>
+            <span class="meta-value" id="last-analysis">—</span>
+        </div>
+        <div class="meta-item">
+            <span class="meta-label">Snapshot</span>
+            <span class="meta-value" id="snapshot-time">—</span>
+        </div>
+        <button class="refresh-btn" id="refresh-btn" type="button">REFRESH</button>
+    </div>
+</header>
+
+<div class="container">
+    <!-- KPI -->
+    <div class="kpi-grid">
+        <div class="kpi">
+            <div class="kpi-label">Total Analyses</div>
+            <div class="kpi-value mono" id="kpi-total">—</div>
+            <div class="kpi-sub">across <span id="kpi-sources">—</span> sources</div>
+        </div>
+        <div class="kpi crit">
+            <div class="kpi-label">Critical Severity</div>
+            <div class="kpi-value mono" id="kpi-crit">—</div>
+            <div class="kpi-sub"><span id="kpi-high">—</span> high · <span id="kpi-med">—</span> med</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi-label">Distinct CVEs</div>
+            <div class="kpi-value mono" id="kpi-cves">—</div>
+            <div class="kpi-sub">avg confidence <span id="kpi-conf">—</span>%</div>
+        </div>
+        <div class="kpi epss">
+            <div class="kpi-label">Top-1% EPSS Hits</div>
+            <div class="kpi-value mono" id="kpi-top1">—</div>
+            <div class="kpi-sub"><span id="kpi-epss90">—</span> above 90% exploit probability</div>
+        </div>
+    </div>
+
+    <!-- MAIN -->
+    <div class="main-grid">
+        <!-- LEFT COL -->
+        <div>
+            <div class="panel" style="margin-bottom: 20px;">
+                <div class="panel-head">
+                    <div><div class="panel-title">Top CVEs by Exploit Probability</div></div>
+                    <div class="panel-tag">EPSS &times; CVSS</div>
+                </div>
+                <table class="cve-table">
+                    <thead>
+                        <tr>
+                            <th>CVE</th>
+                            <th>Severity</th>
+                            <th class="num">EPSS</th>
+                            <th class="num">CVSS</th>
+                            <th class="bar-cell">EPSS gauge</th>
+                            <th class="num">Mentions</th>
+                            <th>Source</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cve-rows"></tbody>
+                </table>
+                <div class="panel-footer">
+                    EPSS ≥ 0.90 = top 1% of all CVEs likely to be exploited in the next 30 days · Source: FIRST.org EPSS + NVD CVSS
+                </div>
+            </div>
+
+            <div class="two-col">
+                <div class="panel">
+                    <div class="panel-head">
+                        <div class="panel-title">Severity Breakdown</div>
+                        <div class="panel-tag">all analyses</div>
+                    </div>
+                    <div class="chart-holder short"><canvas id="sev-chart"></canvas></div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head">
+                        <div class="panel-title">Threat Type</div>
+                        <div class="panel-tag">classified</div>
+                    </div>
+                    <div class="chart-holder short"><canvas id="tt-chart"></canvas></div>
+                </div>
+            </div>
+
+            <div class="panel" style="margin-top: 20px;">
+                <div class="panel-head">
+                    <div class="panel-title">Enrichment Timeline</div>
+                    <div class="panel-tag">analyses / day · last 30d</div>
+                </div>
+                <div class="chart-holder short"><canvas id="day-chart"></canvas></div>
+            </div>
+        </div>
+
+        <!-- RIGHT COL -->
+        <div>
+            <div class="panel" style="margin-bottom: 20px;">
+                <div class="panel-head">
+                    <div class="panel-title">Critical Feed</div>
+                    <div class="panel-tag">severity=critical|high · confidence≥80</div>
+                </div>
+                <div class="feed" id="feed-list"></div>
+            </div>
+
+            <div class="panel" style="margin-bottom: 20px;">
+                <div class="panel-head">
+                    <div class="panel-title">Top Sources</div>
+                    <div class="panel-tag">by volume &amp; hi-severity rate</div>
+                </div>
+                <div class="chart-holder"><canvas id="src-chart"></canvas></div>
+            </div>
+
+            <div class="panel">
+                <div class="tabs">
+                    <div class="tab active" data-tab="actors">Threat Actors</div>
+                    <div class="tab" data-tab="malware">Malware</div>
+                    <div class="tab" data-tab="ttps">MITRE TTPs</div>
+                    <div class="tab" data-tab="geos">Targets</div>
+                </div>
+                <div id="list-actors" class="list-bars"></div>
+                <div id="list-malware" class="list-bars" style="display:none"></div>
+                <div id="list-ttps" class="list-bars" style="display:none"></div>
+                <div id="list-geos" class="list-bars" style="display:none"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="foot-note">
+        TIGER-EYE // pgvector + LLM-enriched OSINT // no stored PII · auto-refresh every <span id="ttl-seconds">60</span>s · all data derived from public feeds
+    </div>
+</div>
+
+<script>
+/* ============== CHART DEFAULTS ============== */
+Chart.defaults.color = '#8b949e';
+Chart.defaults.font.family = "'Inter', sans-serif";
+Chart.defaults.font.size = 11;
+Chart.defaults.borderColor = '#202938';
+
+const MONO_FONT = { family: "'JetBrains Mono', monospace" };
+const SEV_COLOURS = { CRITICAL:'#ff3b52', HIGH:'#ff8800', MEDIUM:'#ffc233', LOW:'#4f9cff', INFORMATIONAL:'#6b7280' };
+const SEV_ORDER = ['CRITICAL','HIGH','MEDIUM','LOW','INFORMATIONAL'];
+const fmt = n => {
+    if (n === null || n === undefined) return '—';
+    return n >= 1000 ? (n/1000).toFixed(1)+'k' : Number(n).toLocaleString();
+};
+const escapeHTML = s => String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+}[c]));
+
+/* ============== CHART INSTANCES (so we can update on refresh) ============== */
+const charts = {};
+
+function destroyCharts() {
+    Object.values(charts).forEach(c => { try { c.destroy(); } catch (e) {} });
+    Object.keys(charts).forEach(k => delete charts[k]);
+}
+
+/* ============== RENDER ============== */
+function render(data) {
+    destroyCharts();
+
+    // Header
+    document.getElementById('last-analysis').textContent = data.kpi.latest_analysis || '—';
+    document.getElementById('snapshot-time').textContent = data.generated_at + 'Z';
+    document.getElementById('ttl-seconds').textContent = data.ttl_seconds;
+
+    // KPIs
+    document.getElementById('kpi-total').textContent = fmt(data.kpi.total_analyses);
+    document.getElementById('kpi-sources').textContent = data.kpi.distinct_sources ?? '—';
+    document.getElementById('kpi-crit').textContent = fmt(data.kpi.critical);
+    document.getElementById('kpi-high').textContent = fmt(data.kpi.high);
+    document.getElementById('kpi-med').textContent = fmt(data.kpi.medium);
+    document.getElementById('kpi-cves').textContent = fmt(data.kpi.distinct_cves);
+    document.getElementById('kpi-conf').textContent = data.kpi.avg_confidence ?? '—';
+    document.getElementById('kpi-top1').textContent = fmt(data.kpi.top_1pct);
+    document.getElementById('kpi-epss90').textContent = fmt(data.kpi.epss_over_90);
+
+    // CVE table
+    document.getElementById('cve-rows').innerHTML = (data.cves || []).map(c => `
+        <tr>
+            <td class="cve-id">${escapeHTML(c.cve_id)}</td>
+            <td><span class="sev ${escapeHTML(c.sev || 'INFORMATIONAL')}">${escapeHTML(c.sev || '—')}</span></td>
+            <td class="num">${c.epss !== null ? Number(c.epss).toFixed(3) : '—'}</td>
+            <td class="num">${c.cvss !== null ? Number(c.cvss).toFixed(1) : '—'}</td>
+            <td class="bar-cell"><div class="mini-bar"><span style="width:${((c.epss || 0) * 100).toFixed(1)}%"></span></div></td>
+            <td class="num">${c.mentions}</td>
+            <td style="color:var(--text-dim);font-size:11px">${escapeHTML(c.primary_source || '—')}${c.n_sources > 1 ? ` <span style="color:var(--text-faint)">+${c.n_sources-1}</span>` : ''}</td>
+        </tr>
+    `).join('');
+
+    // Severity donut
+    const sevMap = { CRITICAL: data.kpi.critical, HIGH: data.kpi.high, MEDIUM: data.kpi.medium, LOW: data.kpi.low, INFORMATIONAL: data.kpi.info };
+    charts.sev = new Chart(document.getElementById('sev-chart'), {
+        type: 'doughnut',
+        data: {
+            labels: SEV_ORDER,
+            datasets: [{
+                data: SEV_ORDER.map(s => sevMap[s] || 0),
+                backgroundColor: SEV_ORDER.map(s => SEV_COLOURS[s]),
+                borderColor: '#0f141c', borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false, cutout: '62%',
+            plugins: {
+                legend: { position: 'right', labels: { font: { ...MONO_FONT, size: 10 }, boxWidth: 10, padding: 10 } },
+                tooltip: {
+                    backgroundColor: '#0a0e14', borderColor: '#2d3a4d', borderWidth: 1,
+                    titleFont: { ...MONO_FONT, size: 11 }, bodyFont: { ...MONO_FONT, size: 11 },
+                    callbacks: {
+                        label: ctx => {
+                            const total = ctx.dataset.data.reduce((a,b)=>a+b,0);
+                            return `${ctx.label}: ${ctx.parsed} (${total ? (ctx.parsed/total*100).toFixed(1) : 0}%)`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // Threat type bar
+    charts.tt = new Chart(document.getElementById('tt-chart'), {
+        type: 'bar',
+        data: {
+            labels: (data.threat_types || []).map(t => String(t.type).replace(/_/g,' ')),
+            datasets: [{
+                data: (data.threat_types || []).map(t => t.n),
+                backgroundColor: '#ff8800cc', borderColor: '#ff8800',
+                borderWidth: 1, borderRadius: 2, barThickness: 12
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+            plugins: {
+                legend: { display: false },
+                tooltip: { backgroundColor: '#0a0e14', borderColor: '#2d3a4d', borderWidth: 1, titleFont: MONO_FONT, bodyFont: MONO_FONT }
+            },
+            scales: {
+                x: { grid: { color: '#202938' }, ticks: { font: { ...MONO_FONT, size: 10 } } },
+                y: { grid: { display: false }, ticks: { font: { ...MONO_FONT, size: 10 } } }
+            }
+        }
+    });
+
+    // Daily timeline
+    const daily = data.daily || [];
+    charts.day = new Chart(document.getElementById('day-chart'), {
+        type: 'bar',
+        data: {
+            labels: daily.map(d => d.day),
+            datasets: [
+                { label: 'CRITICAL', data: daily.map(d => d.critical), backgroundColor: SEV_COLOURS.CRITICAL },
+                { label: 'HIGH',     data: daily.map(d => d.high),     backgroundColor: SEV_COLOURS.HIGH },
+                { label: 'MEDIUM',   data: daily.map(d => d.medium),   backgroundColor: SEV_COLOURS.MEDIUM },
+                { label: 'LOW/INFO', data: daily.map(d => d.low_info), backgroundColor: SEV_COLOURS.LOW }
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'top', align: 'end', labels: { font: { ...MONO_FONT, size: 10 }, boxWidth: 10, padding: 12 } },
+                tooltip: { backgroundColor: '#0a0e14', borderColor: '#2d3a4d', borderWidth: 1 }
+            },
+            scales: {
+                x: { stacked: true, grid: { display: false }, ticks: { font: { ...MONO_FONT, size: 10 } } },
+                y: { stacked: true, grid: { color: '#202938' }, ticks: { font: { ...MONO_FONT, size: 10 } } }
+            }
+        }
+    });
+
+    // Top sources
+    const sources = data.sources || [];
+    charts.src = new Chart(document.getElementById('src-chart'), {
+        type: 'bar',
+        data: {
+            labels: sources.map(s => s.source),
+            datasets: [
+                { label: 'Analyses', data: sources.map(s => s.n), backgroundColor: '#ff880099', borderColor:'#ff8800', borderWidth:1, yAxisID:'y' },
+                { label: 'Hi-Sev %', type:'line', data: sources.map(s => s.n ? +(s.hi_sev/s.n*100).toFixed(1) : 0), borderColor:'#ff3b52', backgroundColor:'#ff3b52', pointRadius:3, tension:0.3, yAxisID:'y1' }
+            ]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'top', align: 'end', labels: { font: { ...MONO_FONT, size: 10 }, boxWidth: 10, padding: 12 } },
+                tooltip: { backgroundColor: '#0a0e14', borderColor: '#2d3a4d', borderWidth: 1 }
+            },
+            scales: {
+                x: { grid: { display: false }, ticks: { font: { ...MONO_FONT, size: 9 }, maxRotation: 45, minRotation: 45 } },
+                y: { beginAtZero: true, grid: { color: '#202938' }, ticks: { font: { ...MONO_FONT, size: 10 } } },
+                y1: { beginAtZero: true, max: 100, position: 'right', grid: { display: false }, ticks: { font: { ...MONO_FONT, size: 10 }, callback: v => v + '%' } }
+            }
+        }
+    });
+
+    // Feed
+    document.getElementById('feed-list').innerHTML = (data.feed || []).map(f => `
+        <div class="feed-item ${escapeHTML(f.sev)}">
+            <div class="feed-meta">
+                <span class="feed-time">${escapeHTML(f.t)}Z</span>
+                <span class="sev ${escapeHTML(f.sev)}">${escapeHTML(f.sev)}</span>
+                <span class="feed-source">${escapeHTML(f.src)}</span>
+                <span class="feed-conf">CONF ${f.conf}</span>
+            </div>
+            <div class="feed-title"><a href="${escapeHTML(f.url)}" target="_blank" rel="noopener">${escapeHTML(f.title)}</a></div>
+            <div class="feed-summary">${escapeHTML(f.summary)}</div>
+        </div>
+    `).join('') || '<div style="padding:20px;color:var(--text-faint);font-size:12px;text-align:center">No high-confidence critical/high-severity analyses yet</div>';
+
+    // Lists
+    renderList('list-actors', (data.actors || []).map(a => ({ name: titleCase(a.name), n: a.n })));
+    renderList('list-malware', (data.malware || []).map(m => ({ name: titleCase(m.name), n: m.n })));
+    renderList('list-ttps', (data.ttps || []).map(t => ({ name: `<span class="mono" style="color:var(--accent)">${escapeHTML(t.id)}</span> ${escapeHTML(t.name || '')}`, n: t.n, raw: true })));
+    renderList('list-geos', (data.geos || []).map(g => ({ name: titleCase(g.geo), n: g.n })));
+}
+
+function titleCase(s) {
+    return escapeHTML(String(s || '').replace(/\b\w/g, c => c.toUpperCase()));
+}
+
+function renderList(listId, items) {
+    const el = document.getElementById(listId);
+    if (!items.length) {
+        el.innerHTML = '<div style="padding:20px;color:var(--text-faint);font-size:12px;text-align:center">no data</div>';
+        return;
+    }
+    const max = Math.max(...items.map(i => i.n));
+    el.innerHTML = items.map(i => `
+        <div class="list-bar">
+            <div class="name">${i.raw ? i.name : escapeHTML(i.name)}</div>
+            <div class="bar"><span style="width:${(i.n/max*100).toFixed(1)}%"></span></div>
+            <div class="count">${i.n}</div>
+        </div>`).join('');
+}
+
+/* ============== TABS ============== */
+document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        ['actors','malware','ttps','geos'].forEach(k => {
+            document.getElementById('list-' + k).style.display = (k === tab.dataset.tab) ? '' : 'none';
+        });
+    });
+});
+
+/* ============== LOAD / REFRESH ============== */
+const loading = document.getElementById('loading');
+const loadingInner = document.getElementById('loading-inner');
+const refreshBtn = document.getElementById('refresh-btn');
+const statusDot = document.getElementById('status-dot');
+const statusText = document.getElementById('status-text');
+let refreshTimer = null;
+let firstLoad = true;
+
+async function loadData({ force = false } = {}) {
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = '…';
+    statusDot.className = 'status-dot warn';
+    statusText.textContent = 'FETCHING';
+
+    try {
+        const url = force ? '/api/dashboard?refresh=1' : '/api/dashboard';
+        const res = await fetch(url, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        render(data);
+
+        statusDot.className = 'status-dot';
+        statusText.textContent = 'CONNECTED';
+        if (firstLoad) {
+            loading.classList.add('hidden');
+            setTimeout(() => loading.remove(), 300);
+            firstLoad = false;
+        }
+
+        // Schedule next refresh from the server's TTL hint
+        clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(() => loadData(), (data.ttl_seconds || 60) * 1000);
+    } catch (err) {
+        statusDot.className = 'status-dot err';
+        statusText.textContent = 'ERROR';
+        if (firstLoad) {
+            loadingInner.innerHTML = '';
+            const el = document.createElement('div');
+            el.className = 'loading-error';
+            el.textContent = `FAILED TO LOAD DASHBOARD: ${err.message}`;
+            loadingInner.appendChild(el);
+        }
+        console.error(err);
+        clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(() => loadData(), 10000);
+    } finally {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = 'REFRESH';
+    }
+}
+
+refreshBtn.addEventListener('click', () => loadData({ force: true }));
+
+loadData();
+</script>
+</body>
+</html>

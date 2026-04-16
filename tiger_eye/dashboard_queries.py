@@ -11,7 +11,7 @@ import asyncio
 import logging
 import time
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import text as sql_text
 
@@ -279,18 +279,9 @@ async def _one(sql: str, params: dict | None = None) -> dict:
 
 async def _build_dashboard() -> dict[str, Any]:
     """Run every panel query in parallel and assemble the payload."""
-    (
-        kpi,
-        cves,
-        threat_types,
-        daily,
-        sources,
-        actors,
-        malware,
-        ttps,
-        geos,
-        feed,
-    ) = await asyncio.gather(
+    # asyncio.gather's static return type widens element types; narrow the
+    # heterogeneous tuple so callers see dict/list as appropriate.
+    results = await asyncio.gather(
         _one(_SQL_KPI),
         _rows(_SQL_TOP_CVES),
         _rows(_SQL_THREAT_TYPES),
@@ -301,6 +292,10 @@ async def _build_dashboard() -> dict[str, Any]:
         _rows(_SQL_TTPS),
         _rows(_SQL_GEOS, {"stopwords": _GEO_STOPWORDS}),
         _rows(_SQL_FEED),
+    )
+    kpi = cast("dict[str, Any]", results[0])
+    cves, threat_types, daily, sources, actors, malware, ttps, geos, feed = (
+        cast("list[dict[str, Any]]", r) for r in results[1:]
     )
 
     # `latest_analysis` comes back as a date; serialise to ISO string.
@@ -333,20 +328,23 @@ async def _build_dashboard() -> dict[str, Any]:
 # would each run ~10 queries against Postgres. Serialise misses on a lock
 # and re-check the cache after acquiring it — only the first caller pays.
 
-_cache: dict[str, Any] = {"value": None, "expires_at": 0.0}
+_cached_payload: dict[str, Any] | None = None
+_cache_expires_at: float = 0.0
 _cache_lock = asyncio.Lock()
 
 
 async def get_dashboard_data(force_refresh: bool = False) -> dict[str, Any]:
     """Return a cached dashboard payload, recomputing on miss or expiry."""
+    global _cached_payload, _cache_expires_at
+
     now = time.monotonic()
-    if not force_refresh and _cache["value"] is not None and _cache["expires_at"] > now:
-        return _cache["value"]
+    if not force_refresh and _cached_payload is not None and _cache_expires_at > now:
+        return _cached_payload
 
     async with _cache_lock:
         now = time.monotonic()
-        if not force_refresh and _cache["value"] is not None and _cache["expires_at"] > now:
-            return _cache["value"]
+        if not force_refresh and _cached_payload is not None and _cache_expires_at > now:
+            return _cached_payload
 
         t0 = time.monotonic()
         data = await _build_dashboard()
@@ -354,12 +352,13 @@ async def get_dashboard_data(force_refresh: bool = False) -> dict[str, Any]:
             "Dashboard cache miss — rebuilt",
             extra={"duration_s": round(time.monotonic() - t0, 3)},
         )
-        _cache["value"] = data
-        _cache["expires_at"] = time.monotonic() + DASHBOARD_TTL_SECONDS
+        _cached_payload = data
+        _cache_expires_at = time.monotonic() + DASHBOARD_TTL_SECONDS
         return data
 
 
 def invalidate_cache() -> None:
     """Clear the cache (for tests / forced refresh)."""
-    _cache["value"] = None
-    _cache["expires_at"] = 0.0
+    global _cached_payload, _cache_expires_at
+    _cached_payload = None
+    _cache_expires_at = 0.0

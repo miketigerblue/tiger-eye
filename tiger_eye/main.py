@@ -7,14 +7,13 @@ import asyncio
 import contextlib
 import logging
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from uuid import UUID
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from prometheus_client import make_asgi_app as prometheus_asgi_app
 from pydantic import BaseModel, Field
-from datetime import UTC, datetime
-
 from sqlalchemy import and_, func, or_, select
 
 from tiger_eye.analysis import DLQ_MAX_ATTEMPTS, analyse_and_persist

@@ -29,11 +29,16 @@
         --low:  #4f9cff;
         --info: #6b7280;
 
-        --grid: #1a2030;
+        --focus: #4f9cff;
         --scan-line: rgba(255, 136, 0, 0.03);
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 2px;
+    }
 
     html, body {
         background: var(--bg);
@@ -47,8 +52,22 @@
             radial-gradient(ellipse at top, rgba(255, 136, 0, 0.04), transparent 70%);
         background-size: 100% 4px, 100% 100%;
     }
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+            animation-duration: 0.001ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.001ms !important;
+        }
+    }
 
     .mono { font-family: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace; }
+    .visually-hidden {
+        position: absolute !important;
+        width: 1px; height: 1px;
+        padding: 0; margin: -1px;
+        overflow: hidden;
+        clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+    }
 
     /* ======================= HEADER ======================= */
     .top-bar {
@@ -60,7 +79,7 @@
         display: flex;
         align-items: center;
         gap: 24px;
-        z-index: 10;
+        z-index: 20;
         backdrop-filter: blur(6px);
     }
     .brand { display: flex; align-items: center; gap: 12px; }
@@ -107,7 +126,7 @@
     .top-meta {
         margin-left: auto;
         display: flex;
-        gap: 28px;
+        gap: 20px;
         align-items: center;
     }
     .meta-item { display: flex; flex-direction: column; gap: 1px; }
@@ -132,11 +151,11 @@
         margin-right: 6px;
         animation: blink 2s infinite;
     }
-    .status-dot.err { background: #ff3b52; box-shadow: 0 0 8px #ff3b52; }
+    .status-dot.err  { background: var(--crit); box-shadow: 0 0 8px var(--crit); }
     .status-dot.warn { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
     @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 
-    .refresh-btn {
+    .btn {
         background: transparent;
         border: 1px solid var(--border-bright);
         color: var(--text-dim);
@@ -149,13 +168,18 @@
         border-radius: 2px;
         transition: all 0.15s ease;
     }
-    .refresh-btn:hover:not(:disabled) {
-        color: var(--accent);
-        border-color: var(--accent);
+    .btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+    .btn:disabled { opacity: 0.5; cursor: default; }
+    .btn .kbd {
+        display: inline-block;
+        margin-left: 8px;
+        padding: 1px 4px;
+        font-size: 9px;
+        color: var(--text-faint);
+        border: 1px solid var(--border);
+        border-radius: 2px;
+        letter-spacing: 0;
     }
-    .refresh-btn:disabled { opacity: 0.5; cursor: default; }
-    .refresh-btn.spinning { animation: spin 1s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
 
     /* ======================= LAYOUT ======================= */
     .container {
@@ -175,7 +199,7 @@
         background: var(--bg-elev-1);
         border: 1px solid var(--border);
         border-radius: 4px;
-        padding: 18px 20px;
+        padding: 16px 20px 12px;
         position: relative;
         overflow: hidden;
     }
@@ -193,15 +217,15 @@
         color: var(--text-faint);
         letter-spacing: 0.14em;
         text-transform: uppercase;
-        margin-bottom: 8px;
+        margin-bottom: 6px;
     }
+    .kpi-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
     .kpi-value {
         font-family: 'JetBrains Mono', monospace;
-        font-size: 32px;
+        font-size: 30px;
         font-weight: 500;
         color: var(--text);
         line-height: 1;
-        margin-bottom: 6px;
     }
     .kpi.crit .kpi-value { color: var(--crit); }
     .kpi.epss .kpi-value { color: var(--high); }
@@ -209,6 +233,11 @@
         font-size: 11px;
         color: var(--text-dim);
         font-family: 'JetBrains Mono', monospace;
+        margin-top: 6px;
+    }
+    .kpi canvas.spark {
+        max-height: 28px;
+        opacity: 0.85;
     }
 
     /* ======================= MAIN GRID ======================= */
@@ -237,6 +266,8 @@
         margin-bottom: 16px;
         padding-bottom: 12px;
         border-bottom: 1px dashed var(--border);
+        gap: 12px;
+        flex-wrap: wrap;
     }
     .panel-title {
         font-size: 13px;
@@ -262,14 +293,9 @@
     }
 
     .chart-holder { position: relative; height: 280px; }
-    .chart-holder.tall { height: 360px; }
     .chart-holder.short { height: 200px; }
 
-    .two-col {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 20px;
-    }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 
     /* ======================= CVE TABLE ======================= */
     .cve-table {
@@ -287,12 +313,25 @@
         text-transform: uppercase;
         padding: 8px 10px;
         border-bottom: 1px solid var(--border-bright);
+        user-select: none;
+        cursor: pointer;
+        white-space: nowrap;
+    }
+    .cve-table thead th.sortable:hover { color: var(--text); }
+    .cve-table thead th.sorted { color: var(--accent); }
+    .cve-table thead th.sort-asc::after  { content: ' ↑'; color: var(--accent); }
+    .cve-table thead th.sort-desc::after { content: ' ↓'; color: var(--accent); }
+    .cve-table tbody tr {
+        cursor: pointer;
+        transition: background 0.1s ease;
     }
     .cve-table tbody td {
         padding: 9px 10px;
         border-bottom: 1px solid var(--border);
     }
-    .cve-table tbody tr:hover { background: var(--bg-elev-2); }
+    .cve-table tbody tr:hover,
+    .cve-table tbody tr:focus-within { background: var(--bg-elev-2); }
+    .cve-table tbody tr:focus-within { outline: 1px solid var(--border-bright); }
     .cve-id { color: var(--accent); font-weight: 500; }
     .num { text-align: right; font-variant-numeric: tabular-nums; }
 
@@ -329,6 +368,62 @@
     .sev.LOW          { background: #0a223a; color: var(--low);  border: 1px solid #14406a; }
     .sev.INFORMATIONAL{ background: #1a1f2a; color: var(--info); border: 1px solid #2a3040; }
 
+    /* ======================= FEED TOOLBAR ======================= */
+    .feed-toolbar {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 12px;
+        flex-wrap: wrap;
+    }
+    .feed-chips { display: flex; gap: 6px; }
+    .chip {
+        padding: 4px 10px;
+        border: 1px solid var(--border-bright);
+        border-radius: 2px;
+        background: transparent;
+        color: var(--text-dim);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: all 0.1s;
+    }
+    .chip:hover { color: var(--text); border-color: var(--text-dim); }
+    .chip.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+    .chip[data-sev="CRITICAL"].active { background: rgba(255,59,82,0.15); color: var(--crit); border-color: var(--crit); }
+    .chip[data-sev="HIGH"].active     { background: rgba(255,136,0,0.15);  color: var(--high); border-color: var(--high); }
+
+    .search-box {
+        flex: 1;
+        min-width: 180px;
+        position: relative;
+    }
+    .search-box input {
+        width: 100%;
+        background: var(--bg-elev-2);
+        border: 1px solid var(--border);
+        border-radius: 2px;
+        padding: 7px 10px 7px 26px;
+        color: var(--text);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        outline: none;
+        transition: border-color 0.1s;
+    }
+    .search-box input:focus { border-color: var(--accent); }
+    .search-box input::placeholder { color: var(--text-faint); }
+    .search-box::before {
+        content: '/';
+        position: absolute;
+        left: 10px; top: 50%;
+        transform: translateY(-50%);
+        color: var(--text-faint);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+    }
+
     /* ======================= FEED ======================= */
     .feed { max-height: 560px; overflow-y: auto; padding-right: 4px; }
     .feed::-webkit-scrollbar { width: 6px; }
@@ -340,6 +435,13 @@
         border-bottom: 1px solid var(--border);
         padding: 14px 4px 14px 14px;
         position: relative;
+        cursor: pointer;
+        transition: background 0.1s;
+    }
+    .feed-item:hover,
+    .feed-item:focus-visible {
+        background: var(--bg-elev-2);
+        outline: none;
     }
     .feed-item:last-child { border-bottom: none; }
     .feed-item::before {
@@ -364,6 +466,7 @@
         font-family: 'JetBrains Mono', monospace;
         font-size: 10px;
         color: var(--text-faint);
+        cursor: help;
     }
     .feed-source {
         font-size: 10px;
@@ -383,12 +486,21 @@
         margin-bottom: 4px;
         line-height: 1.35;
     }
-    .feed-title a { color: inherit; text-decoration: none; }
-    .feed-title a:hover { color: var(--accent); }
     .feed-summary {
         font-size: 11.5px;
         color: var(--text-dim);
         line-height: 1.5;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    .feed-empty {
+        padding: 30px 20px;
+        color: var(--text-faint);
+        font-size: 12px;
+        text-align: center;
+        font-family: 'JetBrains Mono', monospace;
     }
 
     /* ======================= LIST BARS ======================= */
@@ -441,14 +553,256 @@
         text-transform: uppercase;
         color: var(--text-faint);
         cursor: pointer;
+        border: none;
+        background: transparent;
         border-bottom: 2px solid transparent;
         user-select: none;
     }
-    .tab.active {
+    .tab[aria-selected="true"] {
         color: var(--accent);
         border-bottom-color: var(--accent);
     }
-    .tab:hover:not(.active) { color: var(--text); }
+    .tab:hover:not([aria-selected="true"]) { color: var(--text); }
+
+    /* ======================= DRAWER ======================= */
+    .drawer-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(3px);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+        z-index: 40;
+    }
+    .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+
+    .drawer {
+        position: fixed;
+        top: 0; right: 0; bottom: 0;
+        width: min(680px, 95vw);
+        background: var(--bg-elev-1);
+        border-left: 1px solid var(--border-bright);
+        box-shadow: -20px 0 40px rgba(0,0,0,0.4);
+        transform: translateX(100%);
+        transition: transform 0.25s ease;
+        z-index: 50;
+        display: flex;
+        flex-direction: column;
+    }
+    .drawer.open { transform: translateX(0); }
+    .drawer-head {
+        padding: 18px 24px;
+        border-bottom: 1px solid var(--border-bright);
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
+    }
+    .drawer-head .title {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text);
+        line-height: 1.35;
+        margin-bottom: 6px;
+    }
+    .drawer-head .meta {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        color: var(--text-dim);
+        letter-spacing: 0.06em;
+    }
+    .drawer-head .meta .src { color: var(--accent); }
+    .drawer-close {
+        background: transparent;
+        border: none;
+        color: var(--text-dim);
+        cursor: pointer;
+        font-size: 20px;
+        line-height: 1;
+        padding: 4px;
+        margin-left: auto;
+        font-family: 'JetBrains Mono', monospace;
+    }
+    .drawer-close:hover { color: var(--accent); }
+
+    .drawer-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 18px 24px 32px;
+    }
+    .drawer-body::-webkit-scrollbar { width: 6px; }
+    .drawer-body::-webkit-scrollbar-track { background: transparent; }
+    .drawer-body::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+
+    .drawer-section {
+        margin-bottom: 22px;
+    }
+    .drawer-section h3 {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+        margin-bottom: 8px;
+        padding-bottom: 4px;
+        border-bottom: 1px dashed var(--border);
+    }
+    .drawer-section p {
+        font-size: 12.5px;
+        color: var(--text);
+        line-height: 1.6;
+    }
+
+    .kv-grid {
+        display: grid;
+        grid-template-columns: 110px 1fr;
+        gap: 6px 16px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11.5px;
+    }
+    .kv-grid dt {
+        color: var(--text-faint);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 10px;
+        padding-top: 1px;
+    }
+    .kv-grid dd { color: var(--text); }
+    .kv-grid dd .sev { vertical-align: 1px; }
+
+    .tag-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+    .tag {
+        display: inline-block;
+        padding: 3px 8px;
+        background: var(--bg-elev-3);
+        border: 1px solid var(--border-bright);
+        border-radius: 2px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        color: var(--text);
+    }
+    .tag.accent { color: var(--accent); border-color: var(--accent-dim); }
+    .tag.crit   { color: var(--crit); border-color: rgba(255,59,82,0.4); }
+
+    .ioc-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11.5px;
+    }
+    .ioc-table td {
+        padding: 5px 8px;
+        border-bottom: 1px solid var(--border);
+        vertical-align: top;
+    }
+    .ioc-table tr:last-child td { border-bottom: none; }
+    .ioc-table .type {
+        color: var(--text-faint);
+        width: 100px;
+        text-transform: uppercase;
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        padding-top: 7px;
+    }
+    .ioc-table .val { color: var(--accent); word-break: break-all; }
+
+    .action-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    .action-list li {
+        padding: 6px 0 6px 18px;
+        position: relative;
+        font-size: 12px;
+        color: var(--text);
+        line-height: 1.5;
+    }
+    .action-list li::before {
+        content: '▸';
+        position: absolute;
+        left: 0;
+        color: var(--accent);
+    }
+
+    .source-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--accent);
+        text-decoration: none;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11.5px;
+        word-break: break-all;
+    }
+    .source-link:hover { text-decoration: underline; }
+
+    /* ======================= HELP OVERLAY ======================= */
+    .help-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(10, 14, 20, 0.85);
+        backdrop-filter: blur(6px);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 60;
+    }
+    .help-overlay.open { display: flex; }
+    .help-panel {
+        background: var(--bg-elev-2);
+        border: 1px solid var(--border-bright);
+        border-radius: 4px;
+        padding: 28px 32px;
+        max-width: 440px;
+        width: 90%;
+    }
+    .help-panel h2 {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 12px;
+        color: var(--accent);
+        letter-spacing: 0.18em;
+        margin-bottom: 20px;
+        text-transform: uppercase;
+    }
+    .help-panel dl {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 10px 18px;
+        font-size: 12px;
+    }
+    .help-panel kbd {
+        display: inline-block;
+        padding: 2px 8px;
+        background: var(--bg-elev-3);
+        border: 1px solid var(--border-bright);
+        border-radius: 3px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        color: var(--accent);
+        min-width: 22px;
+        text-align: center;
+    }
+    .help-panel dt { color: var(--text); }
+    .help-panel dd { color: var(--text-dim); }
+    .help-panel .dismiss {
+        font-size: 10px;
+        color: var(--text-faint);
+        font-family: 'JetBrains Mono', monospace;
+        letter-spacing: 0.12em;
+        text-align: center;
+        margin-top: 24px;
+        padding-top: 16px;
+        border-top: 1px dashed var(--border);
+        text-transform: uppercase;
+    }
 
     /* ======================= LOADING ======================= */
     .loading-overlay {
@@ -479,6 +833,7 @@
         border-radius: 50%;
         animation: spin 0.8s linear infinite;
     }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .loading-error {
         font-family: 'JetBrains Mono', monospace;
         font-size: 12px;
@@ -500,22 +855,24 @@
 </style>
 </head>
 <body>
-<div class="loading-overlay" id="loading">
+<div class="loading-overlay" id="loading" role="status" aria-live="polite">
     <div class="loading-inner" id="loading-inner">LOADING DASHBOARD</div>
 </div>
 
 <header class="top-bar">
     <div class="brand">
-        <div class="brand-mark"></div>
+        <div class="brand-mark" aria-hidden="true"></div>
         <div class="brand-text">
             <div class="title">TIGER-EYE</div>
-            <div class="subtitle">THREAT INTELLIGENCE CONSOLE // v0.3</div>
+            <div class="subtitle">THREAT INTELLIGENCE CONSOLE // v0.4</div>
         </div>
     </div>
     <div class="top-meta">
         <div class="meta-item">
             <span class="meta-label">Status</span>
-            <span class="meta-value"><span class="status-dot" id="status-dot"></span><span id="status-text">CONNECTED</span></span>
+            <span class="meta-value" aria-live="polite">
+                <span class="status-dot" id="status-dot" aria-hidden="true"></span><span id="status-text">CONNECTED</span>
+            </span>
         </div>
         <div class="meta-item">
             <span class="meta-label">Last Analysis</span>
@@ -525,54 +882,73 @@
             <span class="meta-label">Snapshot</span>
             <span class="meta-value" id="snapshot-time">—</span>
         </div>
-        <button class="refresh-btn" id="refresh-btn" type="button">REFRESH</button>
+        <button class="btn" id="help-btn" type="button" aria-label="Show keyboard shortcuts">? <span class="visually-hidden">Help</span></button>
+        <button class="btn" id="refresh-btn" type="button" aria-label="Refresh dashboard data">REFRESH <span class="kbd">R</span></button>
     </div>
 </header>
 
-<div class="container">
+<main class="container">
     <!-- KPI -->
-    <div class="kpi-grid">
-        <div class="kpi">
+    <section class="kpi-grid" aria-label="Key metrics">
+        <article class="kpi">
             <div class="kpi-label">Total Analyses</div>
-            <div class="kpi-value mono" id="kpi-total">—</div>
-            <div class="kpi-sub">across <span id="kpi-sources">—</span> sources</div>
-        </div>
-        <div class="kpi crit">
+            <div class="kpi-row">
+                <div>
+                    <div class="kpi-value mono" id="kpi-total">—</div>
+                    <div class="kpi-sub">across <span id="kpi-sources">—</span> sources</div>
+                </div>
+                <canvas class="spark" id="spark-total" width="120" height="28" aria-hidden="true"></canvas>
+            </div>
+        </article>
+        <article class="kpi crit">
             <div class="kpi-label">Critical Severity</div>
-            <div class="kpi-value mono" id="kpi-crit">—</div>
-            <div class="kpi-sub"><span id="kpi-high">—</span> high · <span id="kpi-med">—</span> med</div>
-        </div>
-        <div class="kpi">
+            <div class="kpi-row">
+                <div>
+                    <div class="kpi-value mono" id="kpi-crit">—</div>
+                    <div class="kpi-sub"><span id="kpi-high">—</span> high · <span id="kpi-med">—</span> med</div>
+                </div>
+                <canvas class="spark" id="spark-crit" width="120" height="28" aria-hidden="true"></canvas>
+            </div>
+        </article>
+        <article class="kpi">
             <div class="kpi-label">Distinct CVEs</div>
-            <div class="kpi-value mono" id="kpi-cves">—</div>
-            <div class="kpi-sub">avg confidence <span id="kpi-conf">—</span>%</div>
-        </div>
-        <div class="kpi epss">
+            <div class="kpi-row">
+                <div>
+                    <div class="kpi-value mono" id="kpi-cves">—</div>
+                    <div class="kpi-sub">avg confidence <span id="kpi-conf">—</span>%</div>
+                </div>
+            </div>
+        </article>
+        <article class="kpi epss">
             <div class="kpi-label">Top-1% EPSS Hits</div>
-            <div class="kpi-value mono" id="kpi-top1">—</div>
-            <div class="kpi-sub"><span id="kpi-epss90">—</span> above 90% exploit probability</div>
-        </div>
-    </div>
+            <div class="kpi-row">
+                <div>
+                    <div class="kpi-value mono" id="kpi-top1">—</div>
+                    <div class="kpi-sub"><span id="kpi-epss90">—</span> above 90% exploit probability</div>
+                </div>
+            </div>
+        </article>
+    </section>
 
     <!-- MAIN -->
     <div class="main-grid">
         <!-- LEFT COL -->
         <div>
-            <div class="panel" style="margin-bottom: 20px;">
+            <section class="panel" style="margin-bottom: 20px;" aria-label="Top CVEs">
                 <div class="panel-head">
-                    <div><div class="panel-title">Top CVEs by Exploit Probability</div></div>
-                    <div class="panel-tag">EPSS &times; CVSS</div>
+                    <div class="panel-title">Top CVEs by Exploit Probability</div>
+                    <div class="panel-tag">EPSS &times; CVSS · click row for detail</div>
                 </div>
-                <table class="cve-table">
+                <table class="cve-table" id="cve-table">
                     <thead>
                         <tr>
-                            <th>CVE</th>
-                            <th>Severity</th>
-                            <th class="num">EPSS</th>
-                            <th class="num">CVSS</th>
+                            <th class="sortable" data-sort="cve_id">CVE</th>
+                            <th class="sortable" data-sort="sev">Severity</th>
+                            <th class="sortable num sorted sort-desc" data-sort="epss">EPSS</th>
+                            <th class="sortable num" data-sort="cvss">CVSS</th>
                             <th class="bar-cell">EPSS gauge</th>
-                            <th class="num">Mentions</th>
-                            <th>Source</th>
+                            <th class="sortable num" data-sort="mentions">Mentions</th>
+                            <th class="sortable" data-sort="primary_source">Source</th>
                         </tr>
                     </thead>
                     <tbody id="cve-rows"></tbody>
@@ -580,75 +956,114 @@
                 <div class="panel-footer">
                     EPSS ≥ 0.90 = top 1% of all CVEs likely to be exploited in the next 30 days · Source: FIRST.org EPSS + NVD CVSS
                 </div>
-            </div>
+            </section>
 
             <div class="two-col">
-                <div class="panel">
+                <section class="panel">
                     <div class="panel-head">
                         <div class="panel-title">Severity Breakdown</div>
                         <div class="panel-tag">all analyses</div>
                     </div>
                     <div class="chart-holder short"><canvas id="sev-chart"></canvas></div>
-                </div>
+                </section>
 
-                <div class="panel">
+                <section class="panel">
                     <div class="panel-head">
                         <div class="panel-title">Threat Type</div>
                         <div class="panel-tag">classified</div>
                     </div>
                     <div class="chart-holder short"><canvas id="tt-chart"></canvas></div>
-                </div>
+                </section>
             </div>
 
-            <div class="panel" style="margin-top: 20px;">
+            <section class="panel" style="margin-top: 20px;">
                 <div class="panel-head">
                     <div class="panel-title">Enrichment Timeline</div>
                     <div class="panel-tag">analyses / day · last 30d</div>
                 </div>
                 <div class="chart-holder short"><canvas id="day-chart"></canvas></div>
-            </div>
+            </section>
         </div>
 
         <!-- RIGHT COL -->
         <div>
-            <div class="panel" style="margin-bottom: 20px;">
+            <section class="panel" style="margin-bottom: 20px;" aria-label="Critical feed">
                 <div class="panel-head">
                     <div class="panel-title">Critical Feed</div>
-                    <div class="panel-tag">severity=critical|high · confidence≥80</div>
+                    <div class="panel-tag" id="feed-count">—</div>
                 </div>
-                <div class="feed" id="feed-list"></div>
-            </div>
+                <div class="feed-toolbar">
+                    <div class="feed-chips" role="group" aria-label="Filter by severity">
+                        <button class="chip active" data-sev="ALL" aria-pressed="true">All</button>
+                        <button class="chip" data-sev="CRITICAL" aria-pressed="false">Critical</button>
+                        <button class="chip" data-sev="HIGH" aria-pressed="false">High</button>
+                    </div>
+                    <label class="search-box">
+                        <span class="visually-hidden">Search feed</span>
+                        <input type="search" id="feed-search" placeholder="filter titles, sources, summaries…" autocomplete="off">
+                    </label>
+                </div>
+                <div class="feed" id="feed-list" role="list"></div>
+            </section>
 
-            <div class="panel" style="margin-bottom: 20px;">
+            <section class="panel" style="margin-bottom: 20px;">
                 <div class="panel-head">
                     <div class="panel-title">Top Sources</div>
                     <div class="panel-tag">by volume &amp; hi-severity rate</div>
                 </div>
                 <div class="chart-holder"><canvas id="src-chart"></canvas></div>
-            </div>
+            </section>
 
-            <div class="panel">
-                <div class="tabs">
-                    <div class="tab active" data-tab="actors">Threat Actors</div>
-                    <div class="tab" data-tab="malware">Malware</div>
-                    <div class="tab" data-tab="ttps">MITRE TTPs</div>
-                    <div class="tab" data-tab="geos">Targets</div>
+            <section class="panel">
+                <div class="tabs" role="tablist">
+                    <button class="tab" role="tab" data-tab="actors"  id="tab-actors"  aria-selected="true"  aria-controls="list-actors">Threat Actors</button>
+                    <button class="tab" role="tab" data-tab="malware" id="tab-malware" aria-selected="false" aria-controls="list-malware">Malware</button>
+                    <button class="tab" role="tab" data-tab="ttps"    id="tab-ttps"    aria-selected="false" aria-controls="list-ttps">MITRE TTPs</button>
+                    <button class="tab" role="tab" data-tab="geos"    id="tab-geos"    aria-selected="false" aria-controls="list-geos">Targets</button>
                 </div>
-                <div id="list-actors" class="list-bars"></div>
-                <div id="list-malware" class="list-bars" style="display:none"></div>
-                <div id="list-ttps" class="list-bars" style="display:none"></div>
-                <div id="list-geos" class="list-bars" style="display:none"></div>
-            </div>
+                <div id="list-actors"  class="list-bars" role="tabpanel" aria-labelledby="tab-actors"></div>
+                <div id="list-malware" class="list-bars" role="tabpanel" aria-labelledby="tab-malware" hidden></div>
+                <div id="list-ttps"    class="list-bars" role="tabpanel" aria-labelledby="tab-ttps"    hidden></div>
+                <div id="list-geos"    class="list-bars" role="tabpanel" aria-labelledby="tab-geos"    hidden></div>
+            </section>
         </div>
     </div>
 
     <div class="foot-note">
         TIGER-EYE // pgvector + LLM-enriched OSINT // no stored PII · auto-refresh every <span id="ttl-seconds">60</span>s · all data derived from public feeds
     </div>
+</main>
+
+<!-- Drawer -->
+<div class="drawer-backdrop" id="drawer-backdrop" aria-hidden="true"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" aria-hidden="true" tabindex="-1">
+    <div class="drawer-head">
+        <div>
+            <div class="title" id="drawer-title">—</div>
+            <div class="meta" id="drawer-meta"></div>
+        </div>
+        <button class="drawer-close" id="drawer-close" type="button" aria-label="Close detail panel">✕</button>
+    </div>
+    <div class="drawer-body" id="drawer-body"></div>
+</aside>
+
+<!-- Help overlay -->
+<div class="help-overlay" id="help-overlay" aria-hidden="true">
+    <div class="help-panel" role="dialog" aria-modal="true" aria-labelledby="help-title">
+        <h2 id="help-title">Keyboard Shortcuts</h2>
+        <dl>
+            <dt><kbd>R</kbd></dt><dd>Force refresh data</dd>
+            <dt><kbd>/</kbd></dt><dd>Focus feed search</dd>
+            <dt><kbd>1</kbd>–<kbd>4</kbd></dt><dd>Switch right-panel tab</dd>
+            <dt><kbd>Esc</kbd></dt><dd>Close drawer or help</dd>
+            <dt><kbd>?</kbd></dt><dd>Show this help</dd>
+        </dl>
+        <div class="dismiss">press esc or click to dismiss</div>
+    </div>
 </div>
 
 <script>
-/* ============== CHART DEFAULTS ============== */
+/* ============== CONSTANTS ============== */
 Chart.defaults.color = '#8b949e';
 Chart.defaults.font.family = "'Inter', sans-serif";
 Chart.defaults.font.size = 11;
@@ -657,6 +1072,7 @@ Chart.defaults.borderColor = '#202938';
 const MONO_FONT = { family: "'JetBrains Mono', monospace" };
 const SEV_COLOURS = { CRITICAL:'#ff3b52', HIGH:'#ff8800', MEDIUM:'#ffc233', LOW:'#4f9cff', INFORMATIONAL:'#6b7280' };
 const SEV_ORDER = ['CRITICAL','HIGH','MEDIUM','LOW','INFORMATIONAL'];
+
 const fmt = n => {
     if (n === null || n === undefined) return '—';
     return n >= 1000 ? (n/1000).toFixed(1)+'k' : Number(n).toLocaleString();
@@ -664,25 +1080,42 @@ const fmt = n => {
 const escapeHTML = s => String(s ?? '').replace(/[&<>"']/g, c => ({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
 }[c]));
+const titleCase = s => escapeHTML(String(s || '').replace(/\b\w/g, c => c.toUpperCase()));
 
-/* ============== CHART INSTANCES (so we can update on refresh) ============== */
+/* Human-friendly relative time, with absolute as a tooltip. */
+function relTime(iso) {
+    if (!iso) return '—';
+    const then = new Date(iso);
+    const diff = (Date.now() - then.getTime()) / 1000;
+    const abs = then.toISOString().replace('T', ' ').slice(0, 16) + 'Z';
+    if (isNaN(diff)) return abs;
+    let rel;
+    if (diff < 60)        rel = `${Math.max(0, Math.floor(diff))}s ago`;
+    else if (diff < 3600) rel = `${Math.floor(diff/60)}m ago`;
+    else if (diff < 86400)rel = `${Math.floor(diff/3600)}h ago`;
+    else                  rel = `${Math.floor(diff/86400)}d ago`;
+    return { rel, abs };
+}
+
+/* ============== STATE ============== */
+const state = {
+    data: null,
+    cves: [],
+    cveSort: { field: 'epss', dir: 'desc' },
+    feedFilter: { sev: 'ALL', q: '' },
+};
 const charts = {};
-
 function destroyCharts() {
     Object.values(charts).forEach(c => { try { c.destroy(); } catch (e) {} });
     Object.keys(charts).forEach(k => delete charts[k]);
 }
 
-/* ============== RENDER ============== */
-function render(data) {
-    destroyCharts();
-
-    // Header
+/* ============== RENDER: KPIs + sparklines ============== */
+function renderKPIs(data) {
     document.getElementById('last-analysis').textContent = data.kpi.latest_analysis || '—';
     document.getElementById('snapshot-time').textContent = data.generated_at + 'Z';
     document.getElementById('ttl-seconds').textContent = data.ttl_seconds;
 
-    // KPIs
     document.getElementById('kpi-total').textContent = fmt(data.kpi.total_analyses);
     document.getElementById('kpi-sources').textContent = data.kpi.distinct_sources ?? '—';
     document.getElementById('kpi-crit').textContent = fmt(data.kpi.critical);
@@ -693,27 +1126,79 @@ function render(data) {
     document.getElementById('kpi-top1').textContent = fmt(data.kpi.top_1pct);
     document.getElementById('kpi-epss90').textContent = fmt(data.kpi.epss_over_90);
 
-    // CVE table
-    document.getElementById('cve-rows').innerHTML = (data.cves || []).map(c => `
-        <tr>
+    const daily = data.daily || [];
+    charts.sparkTotal = sparkline('spark-total', daily.map(d => d.total), '#ff8800');
+    charts.sparkCrit  = sparkline('spark-crit',  daily.map(d => d.critical), '#ff3b52');
+}
+
+function sparkline(canvasId, points, colour) {
+    const ctx = document.getElementById(canvasId).getContext('2d');
+    return new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: points.map((_, i) => i),
+            datasets: [{
+                data: points,
+                borderColor: colour,
+                backgroundColor: colour + '22',
+                fill: true,
+                borderWidth: 1.5,
+                pointRadius: 0,
+                tension: 0.3,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false }, tooltip: { enabled: false } },
+            scales: { x: { display: false }, y: { display: false, beginAtZero: true } },
+            elements: { line: { capBezierPoints: false } },
+        }
+    });
+}
+
+/* ============== RENDER: CVE table ============== */
+function renderCVEs() {
+    const rows = state.cves.slice().sort((a, b) => {
+        const f = state.cveSort.field;
+        const dir = state.cveSort.dir === 'asc' ? 1 : -1;
+        const av = a[f], bv = b[f];
+        if (av === null || av === undefined) return 1;
+        if (bv === null || bv === undefined) return -1;
+        if (typeof av === 'string') return av.localeCompare(bv) * dir;
+        return (av - bv) * dir;
+    });
+
+    document.getElementById('cve-rows').innerHTML = rows.map(c => `
+        <tr tabindex="0" data-id="${escapeHTML(c.analysis_id || '')}" role="button" aria-label="Open ${escapeHTML(c.cve_id)} detail">
             <td class="cve-id">${escapeHTML(c.cve_id)}</td>
             <td><span class="sev ${escapeHTML(c.sev || 'INFORMATIONAL')}">${escapeHTML(c.sev || '—')}</span></td>
-            <td class="num">${c.epss !== null ? Number(c.epss).toFixed(3) : '—'}</td>
-            <td class="num">${c.cvss !== null ? Number(c.cvss).toFixed(1) : '—'}</td>
+            <td class="num">${c.epss !== null && c.epss !== undefined ? Number(c.epss).toFixed(3) : '—'}</td>
+            <td class="num">${c.cvss !== null && c.cvss !== undefined ? Number(c.cvss).toFixed(1) : '—'}</td>
             <td class="bar-cell"><div class="mini-bar"><span style="width:${((c.epss || 0) * 100).toFixed(1)}%"></span></div></td>
             <td class="num">${c.mentions}</td>
             <td style="color:var(--text-dim);font-size:11px">${escapeHTML(c.primary_source || '—')}${c.n_sources > 1 ? ` <span style="color:var(--text-faint)">+${c.n_sources-1}</span>` : ''}</td>
         </tr>
     `).join('');
 
-    // Severity donut
-    const sevMap = { CRITICAL: data.kpi.critical, HIGH: data.kpi.high, MEDIUM: data.kpi.medium, LOW: data.kpi.low, INFORMATIONAL: data.kpi.info };
+    // Update sort header state
+    document.querySelectorAll('#cve-table thead th.sortable').forEach(th => {
+        th.classList.remove('sorted', 'sort-asc', 'sort-desc');
+        if (th.dataset.sort === state.cveSort.field) {
+            th.classList.add('sorted', state.cveSort.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+        }
+    });
+}
+
+/* ============== RENDER: charts ============== */
+function renderCharts(data) {
+    const k = data.kpi;
     charts.sev = new Chart(document.getElementById('sev-chart'), {
         type: 'doughnut',
         data: {
             labels: SEV_ORDER,
             datasets: [{
-                data: SEV_ORDER.map(s => sevMap[s] || 0),
+                data: [k.critical, k.high, k.medium, k.low, k.info],
                 backgroundColor: SEV_ORDER.map(s => SEV_COLOURS[s]),
                 borderColor: '#0f141c', borderWidth: 2
             }]
@@ -736,13 +1221,13 @@ function render(data) {
         }
     });
 
-    // Threat type bar
+    const tt = data.threat_types || [];
     charts.tt = new Chart(document.getElementById('tt-chart'), {
         type: 'bar',
         data: {
-            labels: (data.threat_types || []).map(t => String(t.type).replace(/_/g,' ')),
+            labels: tt.map(t => String(t.type).replace(/_/g,' ')),
             datasets: [{
-                data: (data.threat_types || []).map(t => t.n),
+                data: tt.map(t => t.n),
                 backgroundColor: '#ff8800cc', borderColor: '#ff8800',
                 borderWidth: 1, borderRadius: 2, barThickness: 12
             }]
@@ -760,7 +1245,6 @@ function render(data) {
         }
     });
 
-    // Daily timeline
     const daily = data.daily || [];
     charts.day = new Chart(document.getElementById('day-chart'), {
         type: 'bar',
@@ -786,7 +1270,6 @@ function render(data) {
         }
     });
 
-    // Top sources
     const sources = data.sources || [];
     charts.src = new Chart(document.getElementById('src-chart'), {
         type: 'bar',
@@ -810,36 +1293,53 @@ function render(data) {
             }
         }
     });
+}
 
-    // Feed
-    document.getElementById('feed-list').innerHTML = (data.feed || []).map(f => `
-        <div class="feed-item ${escapeHTML(f.sev)}">
+/* ============== RENDER: feed (with filter + search) ============== */
+function renderFeed() {
+    const feed = state.data?.feed || [];
+    const q = state.feedFilter.q.trim().toLowerCase();
+    const filtered = feed.filter(f => {
+        if (state.feedFilter.sev !== 'ALL' && f.sev !== state.feedFilter.sev) return false;
+        if (q && !(`${f.title} ${f.src} ${f.summary}`.toLowerCase().includes(q))) return false;
+        return true;
+    });
+    document.getElementById('feed-count').textContent = `${filtered.length} / ${feed.length}`;
+
+    const list = document.getElementById('feed-list');
+    if (!filtered.length) {
+        list.innerHTML = '<div class="feed-empty">no items match the current filter</div>';
+        return;
+    }
+    list.innerHTML = filtered.map(f => {
+        const rt = relTime(f.t);
+        const relText = typeof rt === 'object' ? rt.rel : rt;
+        const absText = typeof rt === 'object' ? rt.abs : '';
+        return `
+        <article class="feed-item ${escapeHTML(f.sev)}" tabindex="0" role="listitem" data-id="${escapeHTML(f.id)}" aria-label="${escapeHTML(f.sev)} — ${escapeHTML(f.title)}">
             <div class="feed-meta">
-                <span class="feed-time">${escapeHTML(f.t)}Z</span>
+                <time class="feed-time" title="${escapeHTML(absText)}">${escapeHTML(relText)}</time>
                 <span class="sev ${escapeHTML(f.sev)}">${escapeHTML(f.sev)}</span>
                 <span class="feed-source">${escapeHTML(f.src)}</span>
                 <span class="feed-conf">CONF ${f.conf}</span>
             </div>
-            <div class="feed-title"><a href="${escapeHTML(f.url)}" target="_blank" rel="noopener">${escapeHTML(f.title)}</a></div>
+            <div class="feed-title">${escapeHTML(f.title)}</div>
             <div class="feed-summary">${escapeHTML(f.summary)}</div>
-        </div>
-    `).join('') || '<div style="padding:20px;color:var(--text-faint);font-size:12px;text-align:center">No high-confidence critical/high-severity analyses yet</div>';
+        </article>`;
+    }).join('');
+}
 
-    // Lists
-    renderList('list-actors', (data.actors || []).map(a => ({ name: titleCase(a.name), n: a.n })));
+/* ============== RENDER: tabbed lists ============== */
+function renderLists(data) {
+    renderList('list-actors',  (data.actors  || []).map(a => ({ name: titleCase(a.name), n: a.n })));
     renderList('list-malware', (data.malware || []).map(m => ({ name: titleCase(m.name), n: m.n })));
-    renderList('list-ttps', (data.ttps || []).map(t => ({ name: `<span class="mono" style="color:var(--accent)">${escapeHTML(t.id)}</span> ${escapeHTML(t.name || '')}`, n: t.n, raw: true })));
-    renderList('list-geos', (data.geos || []).map(g => ({ name: titleCase(g.geo), n: g.n })));
+    renderList('list-ttps',    (data.ttps    || []).map(t => ({ name: `<span class="mono" style="color:var(--accent)">${escapeHTML(t.id)}</span> ${escapeHTML(t.name || '')}`, n: t.n, raw: true })));
+    renderList('list-geos',    (data.geos    || []).map(g => ({ name: titleCase(g.geo), n: g.n })));
 }
-
-function titleCase(s) {
-    return escapeHTML(String(s || '').replace(/\b\w/g, c => c.toUpperCase()));
-}
-
 function renderList(listId, items) {
     const el = document.getElementById(listId);
     if (!items.length) {
-        el.innerHTML = '<div style="padding:20px;color:var(--text-faint);font-size:12px;text-align:center">no data</div>';
+        el.innerHTML = '<div class="feed-empty">no data</div>';
         return;
     }
     const max = Math.max(...items.map(i => i.n));
@@ -851,15 +1351,214 @@ function renderList(listId, items) {
         </div>`).join('');
 }
 
-/* ============== TABS ============== */
-document.querySelectorAll('.tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        ['actors','malware','ttps','geos'].forEach(k => {
-            document.getElementById('list-' + k).style.display = (k === tab.dataset.tab) ? '' : 'none';
-        });
+/* ============== RENDER: detail drawer ============== */
+const drawer = document.getElementById('drawer');
+const drawerBackdrop = document.getElementById('drawer-backdrop');
+let lastFocused = null;
+
+async function openDrawer(analysisId) {
+    if (!analysisId) return;
+    lastFocused = document.activeElement;
+    drawer.classList.add('open');
+    drawerBackdrop.classList.add('open');
+    drawer.setAttribute('aria-hidden', 'false');
+    document.getElementById('drawer-title').textContent = 'Loading…';
+    document.getElementById('drawer-meta').textContent = '';
+    document.getElementById('drawer-body').innerHTML = '';
+
+    try {
+        const res = await fetch(`/api/analysis/${encodeURIComponent(analysisId)}`, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const rec = await res.json();
+        renderDrawer(rec);
+        drawer.focus();
+    } catch (err) {
+        document.getElementById('drawer-body').innerHTML =
+            `<p style="color:var(--crit);font-family:'JetBrains Mono',monospace">Failed to load: ${escapeHTML(err.message)}</p>`;
+    }
+}
+
+function closeDrawer() {
+    drawer.classList.remove('open');
+    drawerBackdrop.classList.remove('open');
+    drawer.setAttribute('aria-hidden', 'true');
+    if (lastFocused && lastFocused.focus) lastFocused.focus();
+}
+
+function renderDrawer(r) {
+    document.getElementById('drawer-title').textContent = r.title || '(no title)';
+    const rt = relTime(r.analysed_at);
+    const relText = typeof rt === 'object' ? rt.rel : rt;
+    document.getElementById('drawer-meta').innerHTML = `
+        <span class="sev ${escapeHTML(r.sev || '')}">${escapeHTML(r.sev || '—')}</span>
+        <span>CONF ${r.conf ?? '—'}</span>
+        <span>${escapeHTML(relText)}</span>
+        <span class="src">${escapeHTML(r.src || '')}</span>
+        ${r.threat_type ? `<span>${escapeHTML(String(r.threat_type).replace(/_/g,' '))}</span>` : ''}
+    `;
+
+    const body = document.getElementById('drawer-body');
+    const sections = [];
+
+    if (r.summary_impact) sections.push(section('Summary', `<p>${escapeHTML(r.summary_impact)}</p>`));
+    if (r.relevance)      sections.push(section('Enterprise relevance', `<p>${escapeHTML(r.relevance)}</p>`));
+    if (r.historical_context) sections.push(section('Historical context', `<p>${escapeHTML(r.historical_context)}</p>`));
+
+    if (arr(r.cve_references).length) {
+        sections.push(section('CVEs', `<div class="tag-list">${
+            arr(r.cve_references).map(c => `<span class="tag accent">${escapeHTML(c)}</span>`).join('')
+        }</div>`));
+    }
+    if (arr(r.ttps).length) {
+        sections.push(section('MITRE ATT&amp;CK', `<div class="tag-list">${
+            arr(r.ttps).map(t => {
+                const id = escapeHTML(t.id || '');
+                const name = escapeHTML(t.name || '');
+                return `<span class="tag"><span style="color:var(--accent)">${id}</span>${name ? ' ' + name : ''}</span>`;
+            }).join('')
+        }</div>`));
+    }
+    if (arr(r.key_iocs).length) {
+        sections.push(section('Indicators', `<table class="ioc-table">${
+            arr(r.key_iocs).map(i => `<tr><td class="type">${escapeHTML(i.type || 'unknown')}</td><td class="val">${escapeHTML(i.value || '')}</td></tr>`).join('')
+        }</table>`));
+    }
+    if (arr(r.recommended_actions).length) {
+        sections.push(section('Recommended actions', `<ul class="action-list">${
+            arr(r.recommended_actions).map(a => `<li>${escapeHTML(a)}</li>`).join('')
+        }</ul>`));
+    }
+
+    const meta = [];
+    if (arr(r.potential_threat_actors).length) meta.push(['Actors',    arr(r.potential_threat_actors).map(titleCase).join(', ')]);
+    if (arr(r.malware_families).length)        meta.push(['Malware',   arr(r.malware_families).map(titleCase).join(', ')]);
+    if (arr(r.tools_used).length)              meta.push(['Tools',     arr(r.tools_used).map(escapeHTML).join(', ')]);
+    if (arr(r.affected_systems_sectors).length)meta.push(['Sectors',   arr(r.affected_systems_sectors).map(titleCase).join(', ')]);
+    if (arr(r.target_geographies).length)      meta.push(['Targets',   arr(r.target_geographies).map(titleCase).join(', ')]);
+    if (meta.length) {
+        sections.push(section('Attribution &amp; scope', `<dl class="kv-grid">${
+            meta.map(([k,v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')
+        }</dl>`));
+    }
+
+    if (r.additional_notes) sections.push(section('Notes', `<p>${escapeHTML(r.additional_notes)}</p>`));
+
+    if (r.url) {
+        sections.push(section('Source', `<a class="source-link" href="${escapeHTML(r.url)}" target="_blank" rel="noopener">${escapeHTML(r.url)} ↗</a>`));
+    }
+
+    body.innerHTML = sections.join('');
+}
+
+function section(title, inner) {
+    return `<div class="drawer-section"><h3>${title}</h3>${inner}</div>`;
+}
+function arr(v) {
+    if (!v) return [];
+    if (Array.isArray(v)) return v;
+    return [];
+}
+
+/* ============== EVENTS ============== */
+// CVE rows click / keyboard
+document.getElementById('cve-table').addEventListener('click', e => {
+    const row = e.target.closest('tr[data-id]');
+    if (row) openDrawer(row.dataset.id);
+});
+document.getElementById('cve-table').addEventListener('keydown', e => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('tr[data-id]')) {
+        e.preventDefault();
+        openDrawer(e.target.dataset.id);
+    }
+});
+// Sortable headers
+document.querySelectorAll('#cve-table thead th.sortable').forEach(th => {
+    th.addEventListener('click', () => {
+        const field = th.dataset.sort;
+        if (state.cveSort.field === field) {
+            state.cveSort.dir = state.cveSort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+            state.cveSort.field = field;
+            state.cveSort.dir = (field === 'cve_id' || field === 'primary_source' || field === 'sev') ? 'asc' : 'desc';
+        }
+        renderCVEs();
     });
+});
+
+// Feed clicks + keyboard
+document.getElementById('feed-list').addEventListener('click', e => {
+    const item = e.target.closest('[data-id]');
+    if (item) openDrawer(item.dataset.id);
+});
+document.getElementById('feed-list').addEventListener('keydown', e => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-id]')) {
+        e.preventDefault();
+        openDrawer(e.target.dataset.id);
+    }
+});
+
+// Chips
+document.querySelectorAll('.feed-chips .chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+        document.querySelectorAll('.feed-chips .chip').forEach(c => {
+            c.classList.remove('active');
+            c.setAttribute('aria-pressed', 'false');
+        });
+        chip.classList.add('active');
+        chip.setAttribute('aria-pressed', 'true');
+        state.feedFilter.sev = chip.dataset.sev;
+        renderFeed();
+    });
+});
+
+// Search
+const searchInput = document.getElementById('feed-search');
+searchInput.addEventListener('input', () => {
+    state.feedFilter.q = searchInput.value;
+    renderFeed();
+});
+
+// Tabs
+document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => activateTab(tab.dataset.tab));
+});
+function activateTab(key) {
+    document.querySelectorAll('.tab').forEach(t => {
+        const active = t.dataset.tab === key;
+        t.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    ['actors','malware','ttps','geos'].forEach(k => {
+        const el = document.getElementById('list-' + k);
+        if (k === key) el.removeAttribute('hidden');
+        else el.setAttribute('hidden', '');
+    });
+}
+
+// Drawer + help dismissal
+document.getElementById('drawer-close').addEventListener('click', closeDrawer);
+drawerBackdrop.addEventListener('click', closeDrawer);
+const helpOverlay = document.getElementById('help-overlay');
+document.getElementById('help-btn').addEventListener('click', () => helpOverlay.classList.add('open'));
+helpOverlay.addEventListener('click', () => helpOverlay.classList.remove('open'));
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+    const typing = /^(INPUT|TEXTAREA)$/i.test(e.target.tagName);
+
+    if (e.key === 'Escape') {
+        if (helpOverlay.classList.contains('open')) helpOverlay.classList.remove('open');
+        else if (drawer.classList.contains('open')) closeDrawer();
+        return;
+    }
+    if (typing) return;
+
+    if (e.key === '?') { e.preventDefault(); helpOverlay.classList.add('open'); return; }
+    if (e.key === '/') { e.preventDefault(); searchInput.focus(); searchInput.select(); return; }
+    if (e.key === 'r' || e.key === 'R') { e.preventDefault(); loadData({ force: true }); return; }
+    if (/^[1-4]$/.test(e.key)) {
+        const map = { '1': 'actors', '2': 'malware', '3': 'ttps', '4': 'geos' };
+        activateTab(map[e.key]);
+    }
 });
 
 /* ============== LOAD / REFRESH ============== */
@@ -873,7 +1572,6 @@ let firstLoad = true;
 
 async function loadData({ force = false } = {}) {
     refreshBtn.disabled = true;
-    refreshBtn.textContent = '…';
     statusDot.className = 'status-dot warn';
     statusText.textContent = 'FETCHING';
 
@@ -882,7 +1580,15 @@ async function loadData({ force = false } = {}) {
         const res = await fetch(url, { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        render(data);
+        state.data = data;
+        state.cves = data.cves || [];
+
+        destroyCharts();
+        renderKPIs(data);
+        renderCVEs();
+        renderCharts(data);
+        renderFeed();
+        renderLists(data);
 
         statusDot.className = 'status-dot';
         statusText.textContent = 'CONNECTED';
@@ -892,7 +1598,6 @@ async function loadData({ force = false } = {}) {
             firstLoad = false;
         }
 
-        // Schedule next refresh from the server's TTL hint
         clearTimeout(refreshTimer);
         refreshTimer = setTimeout(() => loadData(), (data.ttl_seconds || 60) * 1000);
     } catch (err) {
@@ -910,12 +1615,10 @@ async function loadData({ force = false } = {}) {
         refreshTimer = setTimeout(() => loadData(), 10000);
     } finally {
         refreshBtn.disabled = false;
-        refreshBtn.textContent = 'REFRESH';
     }
 }
 
 refreshBtn.addEventListener('click', () => loadData({ force: true }));
-
 loadData();
 </script>
 </body>

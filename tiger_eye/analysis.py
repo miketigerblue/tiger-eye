@@ -100,14 +100,13 @@ async def _record_failure(guid: str, stage: str, exc: BaseException) -> None:
             ).first()
             if row is not None:
                 await db.execute(
-                    sql_text(
-                        "UPDATE failed_enrichment SET next_retry_at = :nr WHERE guid = :g"
-                    ),
+                    sql_text("UPDATE failed_enrichment SET next_retry_at = :nr WHERE guid = :g"),
                     {"nr": _next_retry_at(row.attempts), "g": guid},
                 )
             await db.commit()
     except Exception:
         log.exception("Failed to record DLQ entry", extra={"guid": guid, "stage": stage})
+
 
 # Sentinel tags used in the prompt to delimit untrusted feed content.
 # Any occurrence of these tokens INSIDE the content would let a hostile feed
@@ -128,6 +127,7 @@ def _sanitise_for_prompt(value: str | None) -> str:
     if not value:
         return ""
     return _PROMPT_SENTINELS.sub("[REDACTED_TAG]", value)
+
 
 VALID_THREAT_TYPES = {
     "VULNERABILITY",
@@ -630,9 +630,7 @@ async def analyse_and_persist(entry: ArchiveEntry) -> AnalysisEntry | None:
             published=_sanitise_for_prompt(str(entry.published)) if entry.published else "N/A",
             author=_sanitise_for_prompt(entry.author) or "N/A",
             feed_title=_sanitise_for_prompt(entry.feed_title) or "N/A",
-            categories=(
-                _sanitise_for_prompt(", ".join(entry.categories)) if entry.categories else "N/A"
-            ),
+            categories=(_sanitise_for_prompt(", ".join(entry.categories)) if entry.categories else "N/A"),
             content=_sanitise_for_prompt(content_text[:4000]),
             summary=_sanitise_for_prompt((entry.summary or "")[:2000]),
         )
@@ -666,9 +664,7 @@ async def analyse_and_persist(entry: ArchiveEntry) -> AnalysisEntry | None:
         # 4. Normalise
         if result is None:
             ENTRIES_FAILED.labels(stage="llm").inc()
-            await _record_failure(
-                entry.guid, "llm", last_exc or RuntimeError("LLM returned no result")
-            )
+            await _record_failure(entry.guid, "llm", last_exc or RuntimeError("LLM returned no result"))
             return None
         result = normalise_analysis(result)
 

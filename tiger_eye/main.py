@@ -232,15 +232,11 @@ async def health():
             result = await db.execute(select(func.count()).select_from(AnalysisEntry))
             analysis_count = result.scalar() or 0
             result = await db.execute(
-                select(func.count())
-                .select_from(FailedEnrichment)
-                .where(FailedEnrichment.attempts < DLQ_MAX_ATTEMPTS)
+                select(func.count()).select_from(FailedEnrichment).where(FailedEnrichment.attempts < DLQ_MAX_ATTEMPTS)
             )
             dlq_retryable = result.scalar() or 0
             result = await db.execute(
-                select(func.count())
-                .select_from(FailedEnrichment)
-                .where(FailedEnrichment.attempts >= DLQ_MAX_ATTEMPTS)
+                select(func.count()).select_from(FailedEnrichment).where(FailedEnrichment.attempts >= DLQ_MAX_ATTEMPTS)
             )
             dlq_exhausted = result.scalar() or 0
     except Exception as exc:

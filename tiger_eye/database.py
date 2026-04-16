@@ -216,3 +216,36 @@ class AnalysisEmbedding(Base):
 
     # Relationship
     analysis: Mapped["AnalysisEntry"] = relationship(back_populates="embedding")
+
+
+class FailedEnrichment(Base):
+    """Dead-letter row for an archive entry whose enrichment pipeline failed.
+
+    Written by analysis.analyse_and_persist on final failure. The main
+    enrichment loop uses this table to (a) skip entries that have exhausted
+    their retry budget and (b) avoid reprocessing entries whose next_retry_at
+    is still in the future.
+    """
+
+    __tablename__ = "failed_enrichment"
+
+    guid: Mapped[str] = mapped_column(Text, primary_key=True)
+    stage: Mapped[str] = mapped_column(Text, nullable=False)
+    error_class: Mapped[str | None] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    first_failed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+    last_failed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )
+    next_retry_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+    )

@@ -38,6 +38,12 @@ BACKOFF_STREAK = Gauge(
     "Current consecutive failure streak",
 )
 
+DLQ_DEPTH = Gauge(
+    "tiger_eye_dlq_depth",
+    "Number of entries currently parked in failed_enrichment",
+    ["status"],  # retryable | exhausted
+)
+
 LOOP_RUNNING = Gauge(
     "tiger_eye_loop_running",
     "Whether the enrichment loop is active (1=yes, 0=no)",
@@ -86,4 +92,10 @@ RAG_HITS = Counter(
 RAG_EMPTY = Counter(
     "tiger_eye_rag_empty_total",
     "RAG queries that returned zero results",
+)
+
+RAG_ERRORS = Counter(
+    "tiger_eye_rag_errors_total",
+    "RAG queries that failed (e.g. embedding generation error) — pipeline continued without context",
+    ["stage"],  # embedding, search
 )

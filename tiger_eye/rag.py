@@ -10,7 +10,7 @@ from sqlalchemy import text as sql_text
 
 from tiger_eye.database import get_db
 from tiger_eye.embedding import generate_embedding
-from tiger_eye.metrics import RAG_EMPTY, RAG_HITS, RAG_QUERIES
+from tiger_eye.metrics import RAG_EMPTY, RAG_ERRORS, RAG_HITS, RAG_QUERIES
 
 log = logging.getLogger(__name__)
 
@@ -80,11 +80,23 @@ async def get_similar_analyses(
     try:
         query_vector = await generate_embedding(query_text)
     except Exception:
-        log.exception("Failed to generate query embedding for RAG")
+        RAG_ERRORS.labels(stage="embedding").inc()
+        log.exception(
+            "Failed to generate query embedding for RAG — continuing without context",
+            extra={"title": (title or "")[:80]},
+        )
         return ""
 
     RAG_QUERIES.inc()
-    rows = await _vector_search(query_vector, n_results=top_k, max_distance=MAX_RAG_DISTANCE)
+    try:
+        rows = await _vector_search(query_vector, n_results=top_k, max_distance=MAX_RAG_DISTANCE)
+    except Exception:
+        RAG_ERRORS.labels(stage="search").inc()
+        log.exception(
+            "pgvector search failed for RAG — continuing without context",
+            extra={"title": (title or "")[:80]},
+        )
+        return ""
 
     if not rows:
         RAG_EMPTY.inc()

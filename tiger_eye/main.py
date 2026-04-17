@@ -20,7 +20,7 @@ from sqlalchemy import and_, func, or_, select
 
 from tiger_eye.analysis import DLQ_MAX_ATTEMPTS, analyse_and_persist
 from tiger_eye.config import get_settings
-from tiger_eye.dashboard_queries import get_dashboard_data
+from tiger_eye.dashboard_queries import get_analysis_detail, get_dashboard_data
 from tiger_eye.database import (
     AnalysisEmbedding,
     AnalysisEntry,
@@ -292,6 +292,21 @@ async def api_dashboard(refresh: int = 0):
     """
     with tracer.start_as_current_span("dashboard_data", attributes={"refresh": bool(refresh)}):
         return await get_dashboard_data(force_refresh=bool(refresh))
+
+
+@app.get("/api/analysis/{analysis_id}")
+async def api_analysis_detail(analysis_id: str):
+    """Full enriched analysis record — powers the dashboard detail drawer."""
+    try:
+        UUID(analysis_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid UUID format") from exc
+
+    with tracer.start_as_current_span("analysis_detail"):
+        record = await get_analysis_detail(analysis_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="analysis not found")
+    return record
 
 
 @app.get("/internal/node/{node_id}")

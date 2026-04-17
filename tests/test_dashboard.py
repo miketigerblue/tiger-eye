@@ -113,6 +113,48 @@ async def test_api_dashboard_refresh_flag_forwarded():
 
 
 @pytest.mark.anyio
+async def test_api_analysis_detail_returns_record():
+    fake = {
+        "id": "11111111-1111-1111-1111-111111111111",
+        "title": "Example",
+        "sev": "HIGH",
+        "conf": 92,
+        "src": "CISA",
+        "summary_impact": "Active exploitation.",
+        "cve_references": ["CVE-2026-1234"],
+        "ttps": [{"id": "T1190", "name": "Exploit Public-Facing Application"}],
+    }
+    with patch("tiger_eye.main.get_analysis_detail", AsyncMock(return_value=fake)) as mock_fn:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get(f"/api/analysis/{fake['id']}")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["title"] == "Example"
+    assert body["cve_references"] == ["CVE-2026-1234"]
+    mock_fn.assert_awaited_once_with(fake["id"])
+
+
+@pytest.mark.anyio
+async def test_api_analysis_detail_rejects_bad_uuid():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/api/analysis/not-a-uuid")
+
+    assert resp.status_code == 400
+    assert "invalid UUID" in resp.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_api_analysis_detail_404_when_missing():
+    missing_id = "22222222-2222-2222-2222-222222222222"
+    with patch("tiger_eye.main.get_analysis_detail", AsyncMock(return_value=None)):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get(f"/api/analysis/{missing_id}")
+
+    assert resp.status_code == 404
+
+
+@pytest.mark.anyio
 async def test_dashboard_page_serves_html():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/dashboard")

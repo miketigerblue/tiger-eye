@@ -56,26 +56,41 @@ SELECT
 
 _SQL_TOP_CVES = """
 WITH our AS (
-    SELECT jsonb_array_elements_text(a.cve_references) AS cve_id,
-           a.severity_level, a.confidence, a.source_name
+    SELECT
+        a.id                                    AS analysis_id,
+        a.analysed_at                           AS analysed_at,
+        jsonb_array_elements_text(a.cve_references) AS cve_id,
+        a.severity_level,
+        a.confidence,
+        a.source_name
     FROM analysis a
-    WHERE a.cve_references IS NOT NULL AND jsonb_typeof(a.cve_references) = 'array'
+    WHERE a.cve_references IS NOT NULL
+      AND jsonb_typeof(a.cve_references) = 'array'
 ),
 latest AS (
     SELECT cve_id, epss, percentile
     FROM epss_daily
     WHERE as_of = (SELECT MAX(as_of) FROM epss_daily)
 ),
+-- One representative analysis per CVE: most-recent / highest-confidence.
+rep AS (
+    SELECT DISTINCT ON (cve_id)
+        cve_id, analysis_id
+    FROM our
+    WHERE SUBSTRING(cve_id FROM 1 FOR 4) = 'CVE-'
+    ORDER BY cve_id, analysed_at DESC NULLS LAST, confidence DESC NULLS LAST
+),
 agg AS (
     SELECT
         cve_id,
-        COUNT(*) AS mentions,
+        COUNT(*)                                     AS mentions,
         MODE() WITHIN GROUP (ORDER BY severity_level) AS dominant_severity,
+        MAX(confidence)                              AS max_confidence,
         (
             ARRAY_AGG(DISTINCT source_name ORDER BY source_name)
             FILTER (WHERE source_name IS NOT NULL)
-        )[1:1] AS primary_source,
-        COUNT(DISTINCT source_name) AS n_sources
+        )[1:1]                                       AS primary_source,
+        COUNT(DISTINCT source_name)                  AS n_sources
     FROM our
     WHERE SUBSTRING(cve_id FROM 1 FOR 4) = 'CVE-'
     GROUP BY cve_id
@@ -86,11 +101,14 @@ SELECT
     ROUND(l.percentile::numeric, 4)::float AS percentile,
     ce.cvss_base::float                    AS cvss,
     ag.mentions,
+    ag.max_confidence                      AS max_confidence,
     ag.dominant_severity                   AS sev,
     ag.primary_source[1]                   AS primary_source,
-    ag.n_sources
+    ag.n_sources,
+    rep.analysis_id::text                  AS analysis_id
 FROM agg ag
 JOIN latest l ON l.cve_id = ag.cve_id
+JOIN rep     ON rep.cve_id = ag.cve_id
 LEFT JOIN cve_enriched ce ON ce.cve_id = ag.cve_id AND ce.source = 'NVD'
 ORDER BY l.epss DESC NULLS LAST
 LIMIT 20
@@ -242,22 +260,54 @@ ORDER BY n DESC
 LIMIT 15
 """
 
-_SQL_FEED = """
+_SQL_ANALYSIS_DETAIL = """
 SELECT
     id::text                                                  AS id,
-    COALESCE(entry_title, '(no title)')                       AS title,
-    severity_level                                            AS sev,
+    guid,
     threat_type,
+    severity_level                                            AS sev,
     confidence                                                AS conf,
+    summary_impact,
+    relevance,
+    historical_context,
+    additional_notes,
+    key_iocs,
+    recommended_actions,
+    affected_systems_sectors,
+    potential_threat_actors,
+    cve_references,
+    ttps,
+    tools_used,
+    malware_families,
+    target_geographies,
+    entry_title                                               AS title,
     COALESCE(source_name, 'unknown')                          AS src,
-    to_char(analysed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') AS t,
-    COALESCE(source_url, '#')                                 AS url,
-    COALESCE(summary_impact, '')                              AS summary
+    COALESCE(source_url, '')                                  AS url,
+    feed_title,
+    to_char(analysed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS analysed_at,
+    EXTRACT(EPOCH FROM analysed_at)::bigint                   AS ts
+FROM analysis
+WHERE id = :id
+"""
+
+
+_SQL_FEED = """
+SELECT
+    id::text                                                     AS id,
+    COALESCE(entry_title, '(no title)')                          AS title,
+    severity_level                                               AS sev,
+    threat_type,
+    confidence                                                   AS conf,
+    COALESCE(source_name, 'unknown')                             AS src,
+    to_char(analysed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS t,
+    EXTRACT(EPOCH FROM analysed_at)::bigint                      AS ts,
+    COALESCE(source_url, '#')                                    AS url,
+    COALESCE(summary_impact, '')                                 AS summary
 FROM analysis
 WHERE severity_level IN ('CRITICAL', 'HIGH')
   AND confidence >= 80
 ORDER BY analysed_at DESC, confidence DESC
-LIMIT 25
+LIMIT 40
 """
 
 
@@ -355,6 +405,16 @@ async def get_dashboard_data(force_refresh: bool = False) -> dict[str, Any]:
         _cached_payload = data
         _cache_expires_at = time.monotonic() + DASHBOARD_TTL_SECONDS
         return data
+
+
+async def get_analysis_detail(analysis_id: str) -> dict[str, Any] | None:
+    """Fetch a single enriched analysis record by UUID for the detail drawer.
+
+    Returns None when not found; callers should 404. Not cached — detail
+    lookups are one-shot and low-volume compared to the aggregate payload.
+    """
+    rows = await _rows(_SQL_ANALYSIS_DETAIL, {"id": analysis_id})
+    return rows[0] if rows else None
 
 
 def invalidate_cache() -> None:

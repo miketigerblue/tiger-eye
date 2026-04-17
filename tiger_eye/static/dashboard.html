@@ -505,6 +505,8 @@
 
     /* ======================= LIST BARS ======================= */
     .list-bars { display: flex; flex-direction: column; gap: 8px; }
+    /* HTML `hidden` loses to any author `display`, so restore it explicitly. */
+    .list-bars[hidden] { display: none; }
     .list-bar {
         display: grid;
         grid-template-columns: 160px 1fr 36px;
@@ -1331,10 +1333,13 @@ function renderFeed() {
 
 /* ============== RENDER: tabbed lists ============== */
 function renderLists(data) {
-    renderList('list-actors',  (data.actors  || []).map(a => ({ name: titleCase(a.name), n: a.n })));
-    renderList('list-malware', (data.malware || []).map(m => ({ name: titleCase(m.name), n: m.n })));
-    renderList('list-ttps',    (data.ttps    || []).map(t => ({ name: `<span class="mono" style="color:var(--accent)">${escapeHTML(t.id)}</span> ${escapeHTML(t.name || '')}`, n: t.n, raw: true })));
-    renderList('list-geos',    (data.geos    || []).map(g => ({ name: titleCase(g.geo), n: g.n })));
+    renderList('list-actors',  (data.actors  || []).map(a => ({ name: titleCase(a.name), n: a.n, title: a.name })));
+    renderList('list-malware', (data.malware || []).map(m => ({ name: titleCase(m.name), n: m.n, title: m.name })));
+    renderList('list-ttps',    (data.ttps    || []).map(t => ({
+        name: `<span class="mono" style="color:var(--accent)">${escapeHTML(t.id)}</span> ${escapeHTML(t.name || '')}`,
+        n: t.n, raw: true, title: `${t.id} — ${t.name || ''}`.trim(),
+    })));
+    renderList('list-geos',    (data.geos    || []).map(g => ({ name: titleCase(g.geo), n: g.n, title: g.geo })));
 }
 function renderList(listId, items) {
     const el = document.getElementById(listId);
@@ -1345,7 +1350,7 @@ function renderList(listId, items) {
     const max = Math.max(...items.map(i => i.n));
     el.innerHTML = items.map(i => `
         <div class="list-bar">
-            <div class="name">${i.raw ? i.name : escapeHTML(i.name)}</div>
+            <div class="name" title="${escapeHTML(i.title || '')}">${i.raw ? i.name : escapeHTML(i.name)}</div>
             <div class="bar"><span style="width:${(i.n/max*100).toFixed(1)}%"></span></div>
             <div class="count">${i.n}</div>
         </div>`).join('');

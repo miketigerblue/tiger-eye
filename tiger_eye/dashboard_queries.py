@@ -222,24 +222,30 @@ ORDER BY n DESC
 LIMIT 12
 """
 
-# TTPs: the LLM sometimes emits the same ATT&CK ID twice under different
-# names (e.g. "T1068 Exploitation for Privilege Escalation" and "T1068
-# Privilege Escalation"). Collapse on ID so the panel stays clean.
+# TTPs: the LLM emits varied display names for the same ATT&CK ID (e.g.
+# T1190 as "Exploit Public-Facing Application" 241 times AND "Path
+# Traversal" a handful). We want the dominant name per ID, not whichever
+# one the sort happens to grab. MODE() picks the most frequent value
+# within each group.
 _SQL_TTPS = """
 WITH items AS (
     SELECT jsonb_array_elements(ttps) AS t
     FROM analysis
     WHERE ttps IS NOT NULL AND jsonb_typeof(ttps) = 'array'
+),
+with_names AS (
+    SELECT
+        t->>'id'   AS id,
+        NULLIF(t->>'name', '') AS name
+    FROM items
+    WHERE t->>'id' IS NOT NULL AND t->>'id' <> ''
 )
 SELECT
-    t->>'id' AS id,
-    (ARRAY_AGG(t->>'name' ORDER BY (
-        CASE WHEN t->>'name' IS NULL OR t->>'name' = '' THEN 1 ELSE 0 END
-    )))[1]   AS name,
+    id,
+    MODE() WITHIN GROUP (ORDER BY name) FILTER (WHERE name IS NOT NULL) AS name,
     COUNT(*) AS n
-FROM items
-WHERE t->>'id' IS NOT NULL AND t->>'id' <> ''
-GROUP BY t->>'id'
+FROM with_names
+GROUP BY id
 ORDER BY n DESC
 LIMIT 15
 """

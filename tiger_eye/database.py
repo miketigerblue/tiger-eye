@@ -14,10 +14,15 @@ from functools import lru_cache
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CHAR,
     Column,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
+    LargeBinary,
     Numeric,
     Text,
     Uuid,
@@ -128,6 +133,57 @@ class CveEnriched(Base):
     modified: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class CveKev(Base):
+    """CISA Known Exploited Vulnerabilities catalogue. Read-only — populated by
+    tigerfetch (or a future KEV ingestor). One row per CVE — first-class
+    attribute, not a cve_enriched source.
+    """
+
+    __tablename__ = "cve_kev"
+
+    cve_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    vulnerability_name: Mapped[str | None] = mapped_column(Text)
+    vendor_project: Mapped[str | None] = mapped_column(Text)
+    product: Mapped[str | None] = mapped_column(Text)
+    short_description: Mapped[str | None] = mapped_column(Text)
+    required_action: Mapped[str | None] = mapped_column(Text)
+    date_added: Mapped[datetime | None] = mapped_column(Date)
+    due_date: Mapped[datetime | None] = mapped_column(Date)
+    known_ransomware_use: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    notes: Mapped[str | None] = mapped_column(Text)
+    cwes: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    raw: Mapped[dict | None] = mapped_column(JSONB)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CveEnrichedHistory(Base):
+    """Append-only change-capture log for cve_enriched. Read-only — written by
+    a Postgres trigger on the cve_enriched table.
+
+    prev_* columns hold the OLD value (None on INSERT). Current state lives in
+    cve_enriched; join history rows against it for the full timeline.
+    """
+
+    __tablename__ = "cve_enriched_history"
+
+    history_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    cve_id: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    op: Mapped[str] = mapped_column(CHAR(1), nullable=False)  # 'I' | 'U' | 'D'
+    prev_json: Mapped[dict | None] = mapped_column(JSONB)
+    prev_cvss_base: Mapped[float | None] = mapped_column(Numeric)
+    prev_epss: Mapped[float | None] = mapped_column(Numeric)
+    prev_modified: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    changed_fields: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")
+    )
+
+
 # ---------------------------------------------------------------------------
 # Read-write models — tables owned by tiger-eye
 # ---------------------------------------------------------------------------
@@ -155,12 +211,21 @@ class AnalysisEntry(Base):
     # Structured intelligence (JSONB)
     # key_iocs: [{"type": "ipv4|domain|url|hash_sha256|...", "value": "..."}]
     key_iocs: Mapped[dict | None] = mapped_column(JSONB)
-    # recommended_actions: ["patch X", "block Y", ...] (includes mitigations)
+    # recommended_actions: ["patch X", "block Y", ...] — immediate response steps
+    # (mitigation_strategies below now holds the durable defensive controls)
     recommended_actions: Mapped[dict | None] = mapped_column(JSONB)
+    # Durable defensive controls (patches, segmentation, hardening) —
+    # split from recommended_actions for cleaner querying
+    mitigation_strategies: Mapped[dict | None] = mapped_column(JSONB)
     affected_systems_sectors: Mapped[dict | None] = mapped_column(JSONB)
     potential_threat_actors: Mapped[dict | None] = mapped_column(JSONB)
-    # cve_references: ["CVE-2024-1234", ...] (includes exploit advisory URLs)
+    # cve_references: ["CVE-2024-1234", ...] — pure CVE IDs only now
     cve_references: Mapped[dict | None] = mapped_column(JSONB)
+    # exploit_references: PoC and advisory URLs — split from cve_references
+    exploit_references: Mapped[dict | None] = mapped_column(JSONB)
+    # attack_vectors: how the threat reaches the target (e.g. "spearphishing
+    # attachment", "exposed RDP", "vulnerable web app"). Restored from v1 schema.
+    attack_vectors: Mapped[dict | None] = mapped_column(JSONB)
     # ttps: [{"id": "T1566.001", "name": "Spearphishing Attachment"}, ...]
     ttps: Mapped[dict | None] = mapped_column(JSONB)
     tools_used: Mapped[dict | None] = mapped_column(JSONB)
@@ -191,6 +256,18 @@ class AnalysisEntry(Base):
 
     # Embedding source text (for re-embedding without reconstructing)
     embedding_text: Mapped[str | None] = mapped_column(Text)
+
+    # ---- Provenance (Tier-1 no-info-loss migration) ------------------------
+    # Which model / prompt / pipeline version produced this row.
+    model_id: Mapped[str | None] = mapped_column(Text)
+    prompt_version: Mapped[str | None] = mapped_column(Text)
+    pipeline_version: Mapped[str | None] = mapped_column(Text)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer)
+    response_tokens: Mapped[int | None] = mapped_column(Integer)
+    latency_ms: Mapped[int | None] = mapped_column(Integer)
+    # SHA-256 of the normalised LLM input text — lets us detect when a feed
+    # silently re-edits an article and skip identical-input re-enrichment.
+    input_hash: Mapped[bytes | None] = mapped_column(LargeBinary)
 
     # Relationship
     embedding: Mapped["AnalysisEmbedding | None"] = relationship(

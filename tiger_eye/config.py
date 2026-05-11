@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = EMBEDDING_DIMENSIONS
 
+    # LLM
+    # Captured into analysis.model_id so provenance survives a model bump.
+    llm_model: str = "gpt-5.4-mini"
+
     # Enrichment loop
     enrich_interval: int = 60  # seconds between poll cycles
     enrich_batch_size: int = 20  # entries per cycle

@@ -75,6 +75,23 @@ EMBEDDING_RETRIES = Counter(
     "Total embedding call retries",
 )
 
+# Off-vocab outputs from the LLM — non-zero means the LLM is returning values
+# outside the controlled severity/threat_type vocabulary, which we then coerce.
+# A persistent rise here usually signals prompt drift or model regression.
+LLM_OFF_VOCAB = Counter(
+    "tiger_eye_llm_off_vocab_total",
+    "LLM produced a value outside the controlled vocabulary (was coerced on normalisation)",
+    ["field"],  # severity_level | threat_type
+)
+
+# Cumulative token usage by model — pairs with latency_ms on the analysis row
+# for cost-per-feed and cost-per-prompt-version analyses.
+LLM_TOKENS = Counter(
+    "tiger_eye_llm_tokens_total",
+    "Cumulative LLM tokens consumed",
+    ["model", "direction"],  # direction = prompt | response
+)
+
 # ---------------------------------------------------------------------------
 # RAG
 # ---------------------------------------------------------------------------

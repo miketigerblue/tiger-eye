@@ -4,6 +4,7 @@ Orchestrates: RAG retrieval -> NVD context -> LLM analysis -> normalisation -> p
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -15,6 +16,7 @@ from langchain_openai import ChatOpenAI
 from sqlalchemy import text as sql_text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from tiger_eye import __version__ as PIPELINE_VERSION
 from tiger_eye.config import get_settings
 from tiger_eye.database import (
     AnalysisEmbedding,
@@ -28,10 +30,16 @@ from tiger_eye.metrics import (
     ENTRIES_FAILED,
     ENTRIES_SKIPPED,
     LLM_LATENCY,
+    LLM_OFF_VOCAB,
     LLM_RETRIES,
+    LLM_TOKENS,
 )
 from tiger_eye.rag import get_similar_analyses
 from tiger_eye.tracing import get_tracer
+
+# Bump when ANALYSIS_PROMPT semantics change. Stored on every analysis row so
+# we can A/B-compare outputs across prompt revisions.
+PROMPT_VERSION = "v2"
 
 log = logging.getLogger(__name__)
 tracer = get_tracer()
@@ -408,12 +416,26 @@ Produce a JSON object with exactly these fields:
   type must be one of: ipv4, ipv6, domain, url, hash_md5, hash_sha1,
   hash_sha256, email, filename. Example: [{{"type": "domain", "value": "evil.com"}}]
   Only include IOCs explicitly present in the text.
-- recommended_actions: array of recommended response actions AND mitigation steps
+- recommended_actions: array of IMMEDIATE response actions (e.g. "block IP",
+  "rotate credentials", "isolate host", "apply emergency vendor patch now").
+  Do NOT include durable defensive controls here — those go in mitigation_strategies.
+- mitigation_strategies: array of DURABLE defensive controls and hardening
+  recommendations (e.g. "enable MFA on admin accounts", "segment OT network",
+  "apply WAF rule for path traversal"). These are the long-term measures, not
+  the right-now response.
+- attack_vectors: array of attack vectors used or implied — short strings
+  describing HOW the threat reaches the target (e.g. "spearphishing
+  attachment", "exposed RDP", "malicious npm package", "supply-chain
+  compromise via build pipeline"). Distinct from TTPs (which are ATT&CK
+  techniques) — vectors are the entry method.
 - affected_systems_sectors: array of affected systems/sectors
 - potential_threat_actors: array of attributed or suspected actors (only those
   named or clearly implied in the text)
-- cve_references: array of CVE IDs mentioned (e.g. "CVE-2024-1234"). Include
-  any exploit advisory URLs as separate entries in this array.
+- cve_references: array of CVE IDs ONLY (e.g. "CVE-2024-1234"). Do NOT
+  include URLs in this field — advisory and exploit links go in exploit_references.
+- exploit_references: array of URLs to PoC code, exploit advisories, or
+  vendor security bulletins explicitly referenced in the text. Bare URLs only;
+  no commentary.
 - ttps: array of MITRE ATT&CK techniques as objects with "id" and "name" fields.
   The "id" field is REQUIRED — always provide the ATT&CK technique ID (e.g. T1190).
   Example: [{{"id": "T1566.001", "name": "Spearphishing Attachment"}}]
@@ -461,10 +483,11 @@ Return ONLY valid JSON. No markdown, no explanation."""
 
 
 def _build_llm() -> ChatOpenAI:
+    s = get_settings()
     return ChatOpenAI(
-        model="gpt-5.4-mini",
+        model=s.llm_model,
         temperature=0.0,
-        api_key=get_settings().openai_api_key,
+        api_key=s.openai_api_key,
         model_kwargs={"response_format": {"type": "json_object"}},
     )
 
@@ -498,13 +521,22 @@ async def lookup_cve_context(text: str) -> str:
 
 
 def normalise_analysis(result: dict) -> dict:
-    """Enforce canonical types, severity, confidence, and field structure."""
+    """Enforce canonical types, severity, confidence, and field structure.
+
+    Emits LLM_OFF_VOCAB metric increments when the LLM returns a value outside
+    the controlled vocabularies — non-zero counts there usually signal prompt
+    drift or model regression and are worth alerting on.
+    """
     # threat_type
     tt = str(result.get("threat_type", "")).upper().strip()
+    if tt and tt not in VALID_THREAT_TYPES:
+        LLM_OFF_VOCAB.labels(field="threat_type").inc()
     result["threat_type"] = tt if tt in VALID_THREAT_TYPES else "OTHER"
 
     # severity_level
     sev = str(result.get("severity_level", "")).upper().strip()
+    if sev and sev not in VALID_SEVERITIES:
+        LLM_OFF_VOCAB.labels(field="severity_level").inc()
     result["severity_level"] = sev if sev in VALID_SEVERITIES else "INFORMATIONAL"
 
     # confidence
@@ -563,9 +595,12 @@ def normalise_analysis(result: dict) -> dict:
     # Simple list fields — coerce to list of strings
     list_fields = [
         "recommended_actions",
+        "mitigation_strategies",
+        "attack_vectors",
         "affected_systems_sectors",
         "potential_threat_actors",
         "cve_references",
+        "exploit_references",
         "tools_used",
         "malware_families",
         "target_geographies",
@@ -598,6 +633,22 @@ async def analyse_and_persist(entry: ArchiveEntry) -> AnalysisEntry | None:
         log.warning("Skipping entry — no content or title", extra={"guid": entry.guid})
         ENTRIES_SKIPPED.inc()
         return None
+
+    # SHA-256 of the normalised LLM input — same hash means same input, so a
+    # later re-enrichment can detect "feed silently rewrote the article" or
+    # short-circuit identical-input work. Same shape as build_input_for_hash
+    # downstream — keep deterministic.
+    input_hash = hashlib.sha256(
+        "\n".join(
+            [
+                entry.title or "",
+                (content_text or "")[:4000],
+                (entry.summary or "")[:2000],
+            ]
+        ).encode("utf-8")
+    ).digest()
+
+    s = get_settings()
 
     with tracer.start_as_current_span("analyse_and_persist", attributes={"guid": entry.guid[:20]}):
         # 1. RAG context
@@ -638,11 +689,28 @@ async def analyse_and_persist(entry: ArchiveEntry) -> AnalysisEntry | None:
         llm = _build_llm()
         result = None
         last_exc: BaseException | None = None
+        latency_ms: int | None = None
+        prompt_tokens: int | None = None
+        response_tokens: int | None = None
         for attempt in range(_LLM_MAX_RETRIES + 1):
             try:
                 t0 = time.monotonic()
                 response = await llm.ainvoke(prompt)
-                LLM_LATENCY.observe(time.monotonic() - t0)
+                elapsed = time.monotonic() - t0
+                LLM_LATENCY.observe(elapsed)
+                latency_ms = int(elapsed * 1000)
+                # langchain >=0.1 exposes usage_metadata with input/output_tokens;
+                # older response_metadata.token_usage uses prompt/completion_tokens.
+                usage = getattr(response, "usage_metadata", None) or {}
+                if not usage:
+                    rm = getattr(response, "response_metadata", {}) or {}
+                    usage = rm.get("token_usage") or rm.get("usage") or {}
+                prompt_tokens = usage.get("input_tokens") or usage.get("prompt_tokens")
+                response_tokens = usage.get("output_tokens") or usage.get("completion_tokens")
+                if prompt_tokens:
+                    LLM_TOKENS.labels(model=s.llm_model, direction="prompt").inc(prompt_tokens)
+                if response_tokens:
+                    LLM_TOKENS.labels(model=s.llm_model, direction="response").inc(response_tokens)
                 result = json.loads(response.content)
                 break
             except Exception as exc:
@@ -694,9 +762,12 @@ async def analyse_and_persist(entry: ArchiveEntry) -> AnalysisEntry | None:
             additional_notes=result.get("additional_notes"),
             key_iocs=result.get("key_iocs"),
             recommended_actions=result.get("recommended_actions"),
+            mitigation_strategies=result.get("mitigation_strategies"),
+            attack_vectors=result.get("attack_vectors"),
             affected_systems_sectors=result.get("affected_systems_sectors"),
             potential_threat_actors=result.get("potential_threat_actors"),
             cve_references=result.get("cve_references"),
+            exploit_references=result.get("exploit_references"),
             ttps=result.get("ttps"),
             tools_used=result.get("tools_used"),
             malware_families=result.get("malware_families"),
@@ -712,12 +783,20 @@ async def analyse_and_persist(entry: ArchiveEntry) -> AnalysisEntry | None:
             enriched_at=now,
             inserted_at=now,
             embedding_text=embed_text,
+            # Provenance
+            model_id=s.llm_model,
+            prompt_version=PROMPT_VERSION,
+            pipeline_version=PIPELINE_VERSION,
+            prompt_tokens=prompt_tokens,
+            response_tokens=response_tokens,
+            latency_ms=latency_ms,
+            input_hash=input_hash,
         )
 
         embedding = AnalysisEmbedding(
             analysis_id=analysis_id,
             embedding=vector,
-            model=get_settings().embedding_model,
+            model=s.embedding_model,
             created_at=now,
         )
 

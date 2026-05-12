@@ -93,6 +93,20 @@ LLM_TOKENS = Counter(
 )
 
 # ---------------------------------------------------------------------------
+# LISTEN/NOTIFY listener
+# ---------------------------------------------------------------------------
+
+LISTENER_NOTIFIES = Counter(
+    "tiger_eye_listener_notifies_total",
+    "Total NOTIFY messages received on the article_ingested channel",
+)
+
+LISTENER_CONNECTED = Gauge(
+    "tiger_eye_listener_connected",
+    "Whether the LISTEN connection is currently up (1=yes, 0=no)",
+)
+
+# ---------------------------------------------------------------------------
 # RAG
 # ---------------------------------------------------------------------------
 

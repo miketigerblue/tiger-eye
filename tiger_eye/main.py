@@ -29,6 +29,7 @@ from tiger_eye.database import (
     _get_engine,
     get_db,
 )
+from tiger_eye.listener import run_listener
 from tiger_eye.logging_config import configure_logging
 from tiger_eye.metrics import (
     BACKOFF_STREAK,
@@ -75,8 +76,16 @@ class VectorSearchQuery(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-async def enrichment_loop():
-    """Poll for unenriched archive entries and process them."""
+async def enrichment_loop(wake_event: asyncio.Event | None = None):
+    """Poll for unenriched archive entries and process them.
+
+    If wake_event is provided, the inter-cycle wait is event-driven:
+    sleep up to enrich_interval seconds OR until the listener signals
+    that a new archive row has been ingested, whichever comes first.
+    This drops typical wake-up latency from ~30s (half the poll
+    interval) to sub-second, while keeping the poll as a safety net
+    for any notify dropped during reconnects.
+    """
     global _consecutive_failures
 
     s = get_settings()
@@ -187,7 +196,20 @@ async def enrichment_loop():
             await asyncio.sleep(delay)
             continue
 
-        await asyncio.sleep(s.enrich_interval)
+        # Inter-cycle wait. With wake_event we sleep until either the
+        # timer expires (normal poll cadence) or the listener signals a
+        # new archive row, whichever comes first.
+        if wake_event is None:
+            await asyncio.sleep(s.enrich_interval)
+        else:
+            try:
+                await asyncio.wait_for(wake_event.wait(), timeout=s.enrich_interval)
+            except asyncio.TimeoutError:
+                pass
+            # Clear AFTER the wait so notifies arriving during the wait
+            # collapse to one wake; clear BEFORE the next batch so any
+            # notify during processing schedules the following cycle.
+            wake_event.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -195,22 +217,33 @@ async def enrichment_loop():
 # ---------------------------------------------------------------------------
 
 _loop_task: asyncio.Task | None = None
+_listener_task: asyncio.Task | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _loop_task
+    global _loop_task, _listener_task
 
     s = get_settings()
     configure_logging(log_level=s.log_level, json_output=s.log_json)
     init_tracing()
     instrument_db(_get_engine())
 
-    _loop_task = asyncio.create_task(enrichment_loop())
+    # Listener wakes the enrichment loop sub-second when tigerfetch
+    # commits a new archive row. The loop still polls on enrich_interval
+    # as a safety net for missed notifies.
+    wake_event = asyncio.Event()
+    _listener_task = asyncio.create_task(run_listener(wake_event))
+    _loop_task = asyncio.create_task(enrichment_loop(wake_event))
+
     yield
+
     _loop_task.cancel()
+    _listener_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await _loop_task
+    with contextlib.suppress(asyncio.CancelledError):
+        await _listener_task
 
 
 app = FastAPI(title="tiger-eye", docs_url="/docs", lifespan=lifespan)

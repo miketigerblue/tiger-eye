@@ -321,6 +321,83 @@
     .cve-table thead th.sorted { color: var(--accent); }
     .cve-table thead th.sort-asc::after  { content: ' ↑'; color: var(--accent); }
     .cve-table thead th.sort-desc::after { content: ' ↓'; color: var(--accent); }
+
+    /* Priority badge — fused CVSS × EPSS × KEV × ransomware signal.
+       P0: KEV-listed AND (EPSS>=0.5 OR ransomware-known)
+       P1: KEV-listed OR EPSS>=0.5 OR (CVSS>=9 AND EPSS>=0.1)
+       P2: CVSS>=7 OR EPSS>=0.05
+       P3: everything else */
+    .prio {
+        display: inline-block;
+        min-width: 28px;
+        padding: 2px 7px;
+        font-family: 'JetBrains Mono', monospace;
+        font-weight: 700;
+        font-size: 10.5px;
+        text-align: center;
+        letter-spacing: 0.06em;
+        border-radius: 3px;
+        line-height: 1.4;
+    }
+    .prio.P0 { background: rgba(255, 70, 70, 0.18); color: #ff6464; border: 1px solid rgba(255, 70, 70, 0.45); }
+    .prio.P1 { background: rgba(255, 140, 40, 0.16); color: #ffa552; border: 1px solid rgba(255, 140, 40, 0.40); }
+    .prio.P2 { background: rgba(255, 200, 60, 0.13); color: #ffd066; border: 1px solid rgba(255, 200, 60, 0.32); }
+    .prio.P3 { background: rgba(160, 160, 180, 0.10); color: var(--text-dim); border: 1px solid rgba(160, 160, 180, 0.22); }
+
+    /* Inline KEV / ransomware indicators next to CVE IDs */
+    .kev-pill {
+        display: inline-block;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        padding: 1px 4px;
+        margin-left: 6px;
+        border-radius: 2px;
+        vertical-align: 1px;
+        background: rgba(255, 165, 80, 0.14);
+        color: #ffb072;
+        border: 1px solid rgba(255, 165, 80, 0.32);
+    }
+    .kev-pill.ransom {
+        background: rgba(255, 70, 70, 0.16);
+        color: #ff7d7d;
+        border-color: rgba(255, 70, 70, 0.40);
+    }
+
+    /* Entity badges (actor / malware) — category + country flag */
+    .entity-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 8px 3px 10px;
+        margin: 2px 4px 2px 0;
+        background: var(--bg-elev);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        font-size: 11.5px;
+        line-height: 1.3;
+    }
+    .entity-chip .cat {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 9.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-faint);
+    }
+    .entity-chip .cat.state-sponsored { color: #ff9580; }
+    .entity-chip .cat.cybercrime      { color: #ffb072; }
+    .entity-chip .cat.ransomware      { color: #ff7d7d; }
+    .entity-chip .cat.infostealer     { color: #ffd066; }
+    .entity-chip .cat.rat,
+    .entity-chip .cat.backdoor        { color: #c490ff; }
+    .entity-chip .cat.worm,
+    .entity-chip .cat.botnet          { color: #69d0ff; }
+    .entity-chip .flag {
+        font-size: 12px;
+        line-height: 1;
+        opacity: 0.85;
+    }
     .cve-table tbody tr {
         cursor: pointer;
         transition: background 0.1s ease;
@@ -955,6 +1032,7 @@
                 <table class="cve-table" id="cve-table">
                     <thead>
                         <tr>
+                            <th class="sortable" data-sort="priority">Priority</th>
                             <th class="sortable" data-sort="cve_id">CVE</th>
                             <th class="sortable" data-sort="sev">Severity</th>
                             <th class="sortable num sorted sort-desc" data-sort="epss">EPSS</th>
@@ -1171,7 +1249,50 @@ function sparkline(canvasId, points, colour) {
 }
 
 /* ============== RENDER: CVE table ============== */
+/**
+ * Hover-tooltip text explaining why a CVE got its priority tier.
+ * Reads better than scattering the rationale across the row.
+ */
+function prioTooltip(c, prio) {
+    const parts = [];
+    if (c.kev_listed)      parts.push('on CISA KEV');
+    if (c.kev_ransomware)  parts.push('known ransomware use');
+    if (c.epss != null)    parts.push('EPSS ' + (Number(c.epss) * 100).toFixed(1) + '%');
+    if (c.cvss != null)    parts.push('CVSS ' + Number(c.cvss).toFixed(1));
+    return prio + (parts.length ? ' — ' + parts.join(' · ') : '');
+}
+
+/** ISO 3166-1 alpha-2 → flag emoji. Renders nothing for null/unknown codes. */
+function flagFor(iso) {
+    if (!iso || typeof iso !== 'string' || iso.length !== 2) return '';
+    const codePoints = iso.toUpperCase().split('').map(c => 127397 + c.charCodeAt(0));
+    return String.fromCodePoint(...codePoints);
+}
+
+/**
+ * Compute priority tier from the fused signal (CVSS × EPSS × KEV × ransomware).
+ * Cheap, idempotent, runs on every render.
+ *
+ *   P0: KEV-listed AND (EPSS≥50% OR ransomware-known)   — patch yesterday
+ *   P1: KEV OR EPSS≥50% OR (CVSS≥9 AND EPSS≥10%)        — this week
+ *   P2: CVSS≥7 OR EPSS≥5%                                — this sprint
+ *   P3: everything else                                   — backlog
+ */
+function priorityFor(c) {
+    const ransom = c.kev_ransomware === true;
+    const kev    = c.kev_listed === true;
+    const epss   = Number(c.epss || 0);   // 0..1
+    const cvss   = Number(c.cvss || 0);   // 0..10
+    if (kev && (epss >= 0.5 || ransom))                return 'P0';
+    if (kev || epss >= 0.5 || (cvss >= 9 && epss >= 0.1)) return 'P1';
+    if (cvss >= 7 || epss >= 0.05)                     return 'P2';
+    return 'P3';
+}
+
 function renderCVEs() {
+    // Decorate with priority so it's sortable alongside the other fields.
+    state.cves.forEach(c => { c.priority = priorityFor(c); });
+
     const rows = state.cves.slice().sort((a, b) => {
         const f = state.cveSort.field;
         const dir = state.cveSort.dir === 'asc' ? 1 : -1;
@@ -1182,17 +1303,22 @@ function renderCVEs() {
         return (av - bv) * dir;
     });
 
-    document.getElementById('cve-rows').innerHTML = rows.map(c => `
-        <tr tabindex="0" data-id="${escapeHTML(c.analysis_id || '')}" role="button" aria-label="Open ${escapeHTML(c.cve_id)} detail">
-            <td class="cve-id">${escapeHTML(c.cve_id)}</td>
+    document.getElementById('cve-rows').innerHTML = rows.map(c => {
+        const prio = c.priority;
+        const kevPill   = c.kev_listed ? '<span class="kev-pill">KEV</span>' : '';
+        const ransomPill = c.kev_ransomware ? '<span class="kev-pill ransom" title="Known ransomware-actor use">RANSOM</span>' : '';
+        return `
+        <tr tabindex="0" data-id="${escapeHTML(c.analysis_id || '')}" role="button" aria-label="Open ${escapeHTML(c.cve_id)} detail (priority ${prio})">
+            <td><span class="prio ${prio}" title="${prioTooltip(c, prio)}">${prio}</span></td>
+            <td class="cve-id">${escapeHTML(c.cve_id)}${kevPill}${ransomPill}</td>
             <td><span class="sev ${escapeHTML(c.sev || 'INFORMATIONAL')}">${escapeHTML(c.sev || '—')}</span></td>
             <td class="num">${c.epss !== null && c.epss !== undefined ? Number(c.epss).toFixed(3) : '—'}</td>
             <td class="num">${c.cvss !== null && c.cvss !== undefined ? Number(c.cvss).toFixed(1) : '—'}</td>
             <td class="bar-cell"><div class="mini-bar"><span style="width:${((c.epss || 0) * 100).toFixed(1)}%"></span></div></td>
             <td class="num">${c.mentions}</td>
             <td style="color:var(--text-dim);font-size:11px">${escapeHTML(c.primary_source || '—')}${c.n_sources > 1 ? ` <span style="color:var(--text-faint)">+${c.n_sources-1}</span>` : ''}</td>
-        </tr>
-    `).join('');
+        </tr>`;
+    }).join('');
 
     // Update sort header state
     document.querySelectorAll('#cve-table thead th.sortable').forEach(th => {
@@ -1420,7 +1546,24 @@ function renderDrawer(r) {
     if (r.relevance)      sections.push(section('Enterprise relevance', `<p>${escapeHTML(r.relevance)}</p>`));
     if (r.historical_context) sections.push(section('Historical context', `<p>${escapeHTML(r.historical_context)}</p>`));
 
-    if (arr(r.cve_references).length) {
+    // Prefer the enriched CVE array (with priority/KEV/EPSS info); fall back
+    // to the raw cve_references list for analyses that pre-date the join
+    // (or for non-CVE strings the LLM put in cve_references).
+    if (arr(r.cves_enriched).length) {
+        sections.push(section('CVEs', `<div class="tag-list">${
+            arr(r.cves_enriched).map(c => {
+                const prio = priorityFor(c);
+                const epssTxt = (c.epss != null) ? ' · EPSS ' + (Number(c.epss) * 100).toFixed(0) + '%' : '';
+                const cvssTxt = (c.cvss != null) ? ' · CVSS ' + Number(c.cvss).toFixed(1) : '';
+                const kevTxt  = c.kev_listed ? ' · <span style="color:#ffb072">KEV</span>' : '';
+                const rwTxt   = c.kev_ransomware ? ' · <span style="color:#ff7d7d" title="Known ransomware use">🩸 ransom</span>' : '';
+                return `<span class="tag accent" title="${prioTooltip(c, prio)}">
+                    <span class="prio ${prio}" style="margin-right:6px">${prio}</span>
+                    ${escapeHTML(c.cve_id)}${cvssTxt}${epssTxt}${kevTxt}${rwTxt}
+                </span>`;
+            }).join('')
+        }</div>`));
+    } else if (arr(r.cve_references).length) {
         sections.push(section('CVEs', `<div class="tag-list">${
             arr(r.cve_references).map(c => `<span class="tag accent">${escapeHTML(c)}</span>`).join('')
         }</div>`));
@@ -1463,9 +1606,41 @@ function renderDrawer(r) {
         }</ul>`));
     }
 
+    // Render actor / malware chips with category + country flag when the
+    // enriched arrays are present; fall back to the raw arrays otherwise.
+    function actorChip(a) {
+        const cat   = a.category || '';
+        const flag  = flagFor(a.country);
+        return `<span class="entity-chip" title="${escapeHTML(a.raw_mention || a.canonical_name || '')}">
+            ${flag ? `<span class="flag">${flag}</span>` : ''}
+            <span>${escapeHTML(a.canonical_name || '')}</span>
+            ${cat ? `<span class="cat ${escapeHTML(cat)}">${escapeHTML(cat)}</span>` : ''}
+        </span>`;
+    }
+    function malwareChip(m) {
+        const cat = m.category || '';
+        return `<span class="entity-chip" title="${escapeHTML(m.raw_mention || m.canonical_name || '')}">
+            <span>${escapeHTML(m.canonical_name || '')}</span>
+            ${cat ? `<span class="cat ${escapeHTML(cat)}">${escapeHTML(cat)}</span>` : ''}
+        </span>`;
+    }
+
+    const actorsEnriched   = arr(r.actors_enriched);
+    const malwareEnriched  = arr(r.malware_enriched);
+    const actorsHtml = actorsEnriched.length
+        ? actorsEnriched.map(actorChip).join('')
+        : (arr(r.potential_threat_actors).length
+            ? arr(r.potential_threat_actors).map(a => `<span class="entity-chip">${escapeHTML(a)}</span>`).join('')
+            : '');
+    const malwareHtml = malwareEnriched.length
+        ? malwareEnriched.map(malwareChip).join('')
+        : (arr(r.malware_families).length
+            ? arr(r.malware_families).map(m => `<span class="entity-chip">${escapeHTML(m)}</span>`).join('')
+            : '');
+
     const meta = [];
-    if (arr(r.potential_threat_actors).length) meta.push(['Actors',    arr(r.potential_threat_actors).map(titleCase).join(', ')]);
-    if (arr(r.malware_families).length)        meta.push(['Malware',   arr(r.malware_families).map(titleCase).join(', ')]);
+    if (actorsHtml)  meta.push(['Actors',  actorsHtml]);
+    if (malwareHtml) meta.push(['Malware', malwareHtml]);
     if (arr(r.tools_used).length)              meta.push(['Tools',     arr(r.tools_used).map(escapeHTML).join(', ')]);
     if (arr(r.affected_systems_sectors).length)meta.push(['Sectors',   arr(r.affected_systems_sectors).map(titleCase).join(', ')]);
     if (arr(r.target_geographies).length)      meta.push(['Targets',   arr(r.target_geographies).map(titleCase).join(', ')]);

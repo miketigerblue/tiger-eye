@@ -14,9 +14,9 @@ from functools import lru_cache
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    CHAR,
     BigInteger,
     Boolean,
-    CHAR,
     Column,
     Date,
     DateTime,
@@ -153,8 +153,12 @@ class CveKev(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     cwes: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     raw: Mapped[dict | None] = mapped_column(JSONB)
-    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
-    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
     withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
@@ -171,17 +175,13 @@ class CveEnrichedHistory(Base):
     history_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     cve_id: Mapped[str] = mapped_column(Text, nullable=False)
     source: Mapped[str] = mapped_column(Text, nullable=False)
-    captured_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
-    )
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
     op: Mapped[str] = mapped_column(CHAR(1), nullable=False)  # 'I' | 'U' | 'D'
     prev_json: Mapped[dict | None] = mapped_column(JSONB)
     prev_cvss_base: Mapped[float | None] = mapped_column(Numeric)
     prev_epss: Mapped[float | None] = mapped_column(Numeric)
     prev_modified: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    changed_fields: Mapped[list[str]] = mapped_column(
-        ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")
-    )
+    changed_fields: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default=text("'{}'::text[]"))
 
 
 # ---------------------------------------------------------------------------
@@ -271,9 +271,7 @@ class AnalysisEntry(Base):
 
     # Optional link to the pipeline_runs row that produced this analysis.
     # NULL for analyses written before migration 007.
-    run_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("pipeline_runs.run_id", ondelete="SET NULL")
-    )
+    run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("pipeline_runs.run_id", ondelete="SET NULL"))
 
     # Relationship
     embedding: Mapped["AnalysisEmbedding | None"] = relationship(
@@ -390,9 +388,7 @@ class AnalysisActor(Base):
         Uuid, ForeignKey("threat_actors.id", ondelete="RESTRICT"), primary_key=True
     )
     raw_mention: Mapped[str | None] = mapped_column(Text)
-    linked_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
-    )
+    linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
 
 class AnalysisMalware(Base):
@@ -407,9 +403,7 @@ class AnalysisMalware(Base):
         Uuid, ForeignKey("malware_families.id", ondelete="RESTRICT"), primary_key=True
     )
     raw_mention: Mapped[str | None] = mapped_column(Text)
-    linked_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("now()")
-    )
+    linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
 
 class FailedEnrichment(Base):

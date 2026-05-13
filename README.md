@@ -55,11 +55,16 @@ Part of the tiger ecosystem: **tiger2go** (ingestor) &rarr; **tiger-eye** (enric
 ## Features
 
 - **Enrichment pipeline** -- batch-processes feed entries through LLM analysis with exponential backoff and semaphore-bounded concurrency
-- **RAG context** -- pgvector cosine-distance retrieval injects similar past analyses into the LLM prompt, with token budgeting and distance thresholds
+- **Sub-second wake-up** -- Postgres `LISTEN/NOTIFY` listener wakes the loop the instant tigerfetch commits a new archive row; falls back to the 60s poll if a notify is dropped
+- **Recency-aware RAG** -- pgvector cosine-distance retrieval re-ranked by `exp(-age_days/30)` recency so the LLM sees the analyst's freshest take on a topic, not a stale near-duplicate
+- **Hybrid search** -- `hybrid_search()` SQL function fusing pgvector + Postgres FTS via Reciprocal Rank Fusion. Pure semantic misses keyword-precise queries (`CVE-2026-41940`); pure FTS misses paraphrase; RRF gets both
 - **NVD context lookup** -- extracts CVE IDs from text and fetches live CVSS/EPSS scores from the `cve_enriched` table
+- **First-class entity model** -- canonical `threat_actors` and `malware_families` tables with curated alias collapse (Vidar / Vidar Stealer → Vidar; Cozy Bear → APT29) and generic-label filtering. Pre-seeded with well-known APTs + ISO 3166 attribution
 - **ATT&CK normalisation** -- 260-entry lookup table auto-fills MITRE ATT&CK technique IDs during post-processing
-- **Structured output** -- 18 intelligence fields per analysis: threat type, severity, confidence, IOCs, TTPs, actors, malware families, geographies, sectors, CVEs, tools, recommended actions
-- **Three-pillar observability** -- structlog JSON logging, 13 Prometheus metrics, OpenTelemetry distributed tracing
+- **Strict structured output** -- OpenAI `json_schema` response_format with enum constraints on severity / threat_type / IOC type. 21 intelligence fields per analysis (response actions, durable mitigations, attack vectors, IOCs, TTPs, actors, malware, sectors, geographies, CVEs, exploit references, tools, +context)
+- **Full provenance** -- every analysis row records `model_id`, `prompt_version`, `pipeline_version`, `prompt_tokens`, `response_tokens`, `latency_ms`, `input_hash` (SHA-256 of LLM input)
+- **Per-run observability** -- `pipeline_runs` table with batch_size, p50/p95 latency, token totals, wake source, plus three analyst-facing views (`v_pipeline_runs_recent`, `v_pipeline_cost_per_day`, `v_pipeline_by_prompt_version`)
+- **Three-pillar observability** -- structlog JSON logging, 17+ Prometheus metrics, OpenTelemetry distributed tracing
 - **Grafana dashboard** -- 16-panel provisioned dashboard (pipeline health, latency percentiles, RAG hit rates, threat distribution)
 - **Custom migration runner** -- SHA-256 checksums, dry-run mode, status reporting
 

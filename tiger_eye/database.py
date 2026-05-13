@@ -295,6 +295,81 @@ class AnalysisEmbedding(Base):
     analysis: Mapped["AnalysisEntry"] = relationship(back_populates="embedding")
 
 
+class ThreatActor(Base):
+    """Canonical threat-actor entity. One row per actor; aliases live in the
+    `tiger_eye.entities` curated maps, not in the DB.
+
+    Populated by tiger_eye.entities.canonicalise_actor — generic labels
+    (Attacker / unknown / suspected state-sponsored hackers) are filtered
+    out and never get a row here.
+    """
+
+    __tablename__ = "threat_actors"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, server_default=text("uuid_generate_v4()"))
+    canonical_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    normalised_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    category: Mapped[str | None] = mapped_column(Text)
+    attribution_country: Mapped[str | None] = mapped_column(Text)  # ISO 3166-1 alpha-2
+    description: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+
+class MalwareFamily(Base):
+    """Canonical malware-family entity. One row per family; aliases live in
+    the `tiger_eye.entities` curated maps, not in the DB.
+
+    Populated by tiger_eye.entities.canonicalise_malware — generic labels
+    (`ransomware`, `infostealer`, `banking trojans`) are filtered out and
+    never get a row here.
+    """
+
+    __tablename__ = "malware_families"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, server_default=text("uuid_generate_v4()"))
+    canonical_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    normalised_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    category: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+
+class AnalysisActor(Base):
+    """Many-to-many: an analysis row references one or more threat actors."""
+
+    __tablename__ = "analysis_actor"
+
+    analysis_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("analysis.id", ondelete="CASCADE"), primary_key=True
+    )
+    actor_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("threat_actors.id", ondelete="RESTRICT"), primary_key=True
+    )
+    raw_mention: Mapped[str | None] = mapped_column(Text)
+    linked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class AnalysisMalware(Base):
+    """Many-to-many: an analysis row references one or more malware families."""
+
+    __tablename__ = "analysis_malware"
+
+    analysis_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("analysis.id", ondelete="CASCADE"), primary_key=True
+    )
+    family_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("malware_families.id", ondelete="RESTRICT"), primary_key=True
+    )
+    raw_mention: Mapped[str | None] = mapped_column(Text)
+    linked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 class FailedEnrichment(Base):
     """Dead-letter row for an archive entry whose enrichment pipeline failed.
 

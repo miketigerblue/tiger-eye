@@ -105,13 +105,87 @@ SELECT
     ag.dominant_severity                   AS sev,
     ag.primary_source[1]                   AS primary_source,
     ag.n_sources,
-    rep.analysis_id::text                  AS analysis_id
+    rep.analysis_id::text                  AS analysis_id,
+    -- KEV enrichment (PR #34 series) — fuels the priority badge
+    (kv.cve_id IS NOT NULL)                AS kev_listed,
+    kv.known_ransomware_use                AS kev_ransomware,
+    kv.due_date                            AS kev_due_date,
+    kv.vendor_project                      AS kev_vendor,
+    kv.product                             AS kev_product
 FROM agg ag
 JOIN latest l ON l.cve_id = ag.cve_id
 JOIN rep     ON rep.cve_id = ag.cve_id
 LEFT JOIN cve_enriched ce ON ce.cve_id = ag.cve_id AND ce.source = 'NVD'
+LEFT JOIN cve_kev kv ON kv.cve_id = ag.cve_id AND kv.withdrawn_at IS NULL
 ORDER BY l.epss DESC NULLS LAST
 LIMIT 20
+"""
+
+# ---------------------------------------------------------------------------
+# Detail-drawer enrichment side-cars
+# ---------------------------------------------------------------------------
+# These run alongside _SQL_ANALYSIS_DETAIL when the drawer opens. They turn
+# the raw jsonb arrays on the analysis row into entity-enriched chips:
+#
+#   "CVE-2024-3400"   -> { cve_id, cvss, epss, percentile, kev_*, vendor/product }
+#   "TeamPCP"          -> { canonical_name, category, attribution_country }
+#   "Vidar Stealer"    -> { canonical_name, category }
+#
+# Actor / malware enrichment routes through the analysis_actor /
+# analysis_malware join tables (populated at write-time by
+# tiger_eye.analysis._link_entities), so it inherits all the canonicaliser
+# alias-collapse done in tiger_eye.entities.
+
+_SQL_DETAIL_CVE_ENRICHMENT = """
+WITH cves AS (
+    SELECT DISTINCT upper((regexp_matches(ref, 'CVE-[0-9]{4}-[0-9]{4,7}', 'g'))[1]) AS cve_id
+    FROM analysis a, LATERAL jsonb_array_elements_text(a.cve_references) AS ref
+    WHERE a.id = :id
+      AND a.cve_references IS NOT NULL
+      AND jsonb_typeof(a.cve_references) = 'array'
+)
+SELECT
+    c.cve_id,
+    ce.cvss_base::float                       AS cvss,
+    ROUND(le.epss::numeric, 4)::float         AS epss,
+    ROUND(le.percentile::numeric, 4)::float   AS percentile,
+    (kv.cve_id IS NOT NULL)                   AS kev_listed,
+    COALESCE(kv.known_ransomware_use, FALSE)  AS kev_ransomware,
+    kv.due_date                               AS kev_due_date,
+    kv.vendor_project                         AS kev_vendor,
+    kv.product                                AS kev_product
+FROM cves c
+LEFT JOIN cve_enriched ce ON ce.cve_id = c.cve_id AND ce.source = 'NVD'
+LEFT JOIN LATERAL (
+    SELECT epss, percentile FROM epss_daily
+    WHERE cve_id = c.cve_id
+    ORDER BY as_of DESC LIMIT 1
+) le ON TRUE
+LEFT JOIN cve_kev kv ON kv.cve_id = c.cve_id AND kv.withdrawn_at IS NULL
+ORDER BY le.epss DESC NULLS LAST, c.cve_id
+"""
+
+_SQL_DETAIL_ACTOR_ENRICHMENT = """
+SELECT
+    aa.raw_mention                AS raw_mention,
+    ta.canonical_name             AS canonical_name,
+    ta.category                   AS category,
+    ta.attribution_country        AS country
+FROM analysis_actor aa
+JOIN threat_actors ta ON ta.id = aa.actor_id
+WHERE aa.analysis_id = :id
+ORDER BY ta.canonical_name
+"""
+
+_SQL_DETAIL_MALWARE_ENRICHMENT = """
+SELECT
+    am.raw_mention                AS raw_mention,
+    mf.canonical_name             AS canonical_name,
+    mf.category                   AS category
+FROM analysis_malware am
+JOIN malware_families mf ON mf.id = am.family_id
+WHERE am.analysis_id = :id
+ORDER BY mf.canonical_name
 """
 
 _SQL_THREAT_TYPES = """
@@ -433,9 +507,30 @@ async def get_analysis_detail(analysis_id: str) -> dict[str, Any] | None:
 
     Returns None when not found; callers should 404. Not cached — detail
     lookups are one-shot and low-volume compared to the aggregate payload.
+
+    Pulls four queries in parallel:
+      * the analysis row itself
+      * per-CVE enrichment   (cvss, epss, kev, ransomware flag, due date)
+      * per-actor enrichment (canonical name, category, country)
+      * per-malware enrichment (canonical name, category)
+
+    The three enrichment lists are merged into the response as
+    `cves_enriched`, `actors_enriched`, `malware_enriched` so the drawer
+    can render priority badges + entity chips without further round-trips.
     """
-    rows = await _rows(_SQL_ANALYSIS_DETAIL, {"id": analysis_id})
-    return rows[0] if rows else None
+    base_task = _rows(_SQL_ANALYSIS_DETAIL, {"id": analysis_id})
+    cve_task = _rows(_SQL_DETAIL_CVE_ENRICHMENT, {"id": analysis_id})
+    actor_task = _rows(_SQL_DETAIL_ACTOR_ENRICHMENT, {"id": analysis_id})
+    malware_task = _rows(_SQL_DETAIL_MALWARE_ENRICHMENT, {"id": analysis_id})
+
+    base_rows, cves, actors, malware = await asyncio.gather(base_task, cve_task, actor_task, malware_task)
+    if not base_rows:
+        return None
+    row = base_rows[0]
+    row["cves_enriched"] = cves
+    row["actors_enriched"] = actors
+    row["malware_enriched"] = malware
+    return row
 
 
 def invalidate_cache() -> None:

@@ -785,7 +785,10 @@ def normalise_analysis(result: dict) -> dict:
     return result
 
 
-async def analyse_and_persist(entry: ArchiveEntry) -> AnalysisEntry | None:
+async def analyse_and_persist(
+    entry: ArchiveEntry,
+    run_id: uuid.UUID | None = None,
+) -> AnalysisEntry | None:
     """Full enrichment pipeline for a single archive entry.
 
     1. RAG retrieval (pgvector)
@@ -794,6 +797,9 @@ async def analyse_and_persist(entry: ArchiveEntry) -> AnalysisEntry | None:
     4. Normalisation
     5. Generate embedding
     6. Single-transaction persist (analysis + embedding)
+
+    Optional run_id links the analysis row back to its pipeline_runs row,
+    enabling per-run aggregation of cost, latency, and yield.
     """
     content_text = entry.content or entry.summary or ""
     if not content_text.strip() and not entry.title:
@@ -958,6 +964,7 @@ async def analyse_and_persist(entry: ArchiveEntry) -> AnalysisEntry | None:
             response_tokens=response_tokens,
             latency_ms=latency_ms,
             input_hash=input_hash,
+            run_id=run_id,
         )
 
         embedding = AnalysisEmbedding(

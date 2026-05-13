@@ -6,6 +6,7 @@ Dual-mode: FastAPI internal API + background enrichment loop.
 import asyncio
 import contextlib
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,7 +19,8 @@ from prometheus_client import make_asgi_app as prometheus_asgi_app
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 
-from tiger_eye.analysis import DLQ_MAX_ATTEMPTS, analyse_and_persist
+from tiger_eye import __version__ as PIPELINE_VERSION
+from tiger_eye.analysis import DLQ_MAX_ATTEMPTS, PROMPT_VERSION, analyse_and_persist
 from tiger_eye.config import get_settings
 from tiger_eye.dashboard_queries import get_analysis_detail, get_dashboard_data
 from tiger_eye.database import (
@@ -26,6 +28,7 @@ from tiger_eye.database import (
     AnalysisEntry,
     ArchiveEntry,
     FailedEnrichment,
+    PipelineRun,
     _get_engine,
     get_db,
 )
@@ -54,6 +57,65 @@ _CONCURRENCY = 5  # max parallel enrichment tasks per batch
 def _backoff_delay() -> float:
     """Exponential backoff: 2^failures seconds, capped at _MAX_BACKOFF."""
     return float(min(2**_consecutive_failures, _MAX_BACKOFF))
+
+
+def _percentile(values: list[int], pct: float) -> int | None:
+    """Tiny percentile helper — sorted-index, no numpy dep."""
+    if not values:
+        return None
+    s = sorted(values)
+    idx = int(len(s) * pct)
+    return s[min(idx, len(s) - 1)]
+
+
+async def _write_pipeline_run(
+    *,
+    run_id: uuid.UUID,
+    started_at: datetime,
+    finished_at: datetime,
+    batch_size: int,
+    enriched_count: int,
+    failed_count: int,
+    analyses: list[AnalysisEntry],
+    wake_source: str,
+    consecutive_failures: int,
+    failure_reason: str | None = None,
+) -> None:
+    """Insert a pipeline_runs row summarising this cycle. Best-effort —
+    a logging-table write must never break the enrichment loop.
+    """
+    try:
+        latencies = [a.latency_ms for a in analyses if getattr(a, "latency_ms", None) is not None]
+        prompt_tokens = sum((a.prompt_tokens or 0) for a in analyses if getattr(a, "prompt_tokens", None) is not None)
+        response_tokens = sum((a.response_tokens or 0) for a in analyses if getattr(a, "response_tokens", None) is not None)
+
+        s = get_settings()
+        row = PipelineRun(
+            run_id=run_id,
+            started_at=started_at,
+            finished_at=finished_at,
+            duration_ms=int((finished_at - started_at).total_seconds() * 1000),
+            batch_size=batch_size,
+            enriched_count=enriched_count,
+            failed_count=failed_count,
+            skipped_count=0,
+            prompt_tokens_total=prompt_tokens or None,
+            response_tokens_total=response_tokens or None,
+            llm_p50_ms=_percentile(latencies, 0.50),
+            llm_p95_ms=_percentile(latencies, 0.95),
+            llm_max_ms=max(latencies) if latencies else None,
+            model_id=s.llm_model,
+            prompt_version=PROMPT_VERSION,
+            pipeline_version=PIPELINE_VERSION,
+            wake_source=wake_source,
+            consecutive_failures=consecutive_failures,
+            failure_reason=failure_reason,
+        )
+        async with get_db() as db:
+            db.add(row)
+            await db.commit()
+    except Exception:
+        log.exception("Failed to write pipeline_runs row", extra={"run_id": str(run_id)})
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +157,13 @@ async def enrichment_loop(wake_event: asyncio.Event | None = None):
     )
     LOOP_RUNNING.set(1)
 
+    # First cycle is always 'initial'; subsequent cycles get either
+    # 'notify' (wake_event fired) or 'poll' (timer expired).
+    wake_source = "initial"
+
     while True:
+        run_id = uuid.uuid4()
+        cycle_started_at = datetime.now(UTC)
         try:
             async with get_db() as db:
                 # Pick up entries that:
@@ -133,9 +201,9 @@ async def enrichment_loop(wake_event: asyncio.Event | None = None):
 
                 sem = asyncio.Semaphore(_CONCURRENCY)
 
-                async def _bounded_enrich(e, _sem=sem):
+                async def _bounded_enrich(e, _sem=sem, _run_id=run_id):
                     async with _sem:
-                        return await analyse_and_persist(e)
+                        return await analyse_and_persist(e, run_id=_run_id)
 
                 with tracer.start_as_current_span("enrichment_batch", attributes={"batch_size": len(entries)}):
                     results = await asyncio.gather(
@@ -165,6 +233,24 @@ async def enrichment_loop(wake_event: asyncio.Event | None = None):
                 log.info(
                     "Enrichment cycle complete",
                     extra={"enriched": enriched, "failed": failures, "total": len(entries)},
+                )
+
+                # Write the pipeline_runs row summarising this cycle.
+                # Empty polls don't reach here (the `if not entries` branch
+                # above continues to the wait), so every row we write
+                # represents a cycle that did work.
+                enriched_analyses = [r for r in results if isinstance(r, AnalysisEntry)]
+                await _write_pipeline_run(
+                    run_id=run_id,
+                    started_at=cycle_started_at,
+                    finished_at=datetime.now(UTC),
+                    batch_size=len(entries),
+                    enriched_count=enriched,
+                    failed_count=failures,
+                    analyses=enriched_analyses,
+                    wake_source=wake_source,
+                    consecutive_failures=_consecutive_failures,
+                    failure_reason=("all entries failed" if failures == len(entries) else None),
                 )
 
                 if failures == len(entries):
@@ -198,14 +284,18 @@ async def enrichment_loop(wake_event: asyncio.Event | None = None):
 
         # Inter-cycle wait. With wake_event we sleep until either the
         # timer expires (normal poll cadence) or the listener signals a
-        # new archive row, whichever comes first.
+        # new archive row, whichever comes first. wake_source is
+        # captured here so the NEXT cycle's pipeline_runs row records
+        # how it was triggered.
         if wake_event is None:
             await asyncio.sleep(s.enrich_interval)
+            wake_source = "poll"
         else:
             try:
                 await asyncio.wait_for(wake_event.wait(), timeout=s.enrich_interval)
+                wake_source = "notify"
             except asyncio.TimeoutError:
-                pass
+                wake_source = "poll"
             # Clear AFTER the wait so notifies arriving during the wait
             # collapse to one wake; clear BEFORE the next batch so any
             # notify during processing schedules the following cycle.

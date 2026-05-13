@@ -39,6 +39,46 @@ import re
 # These show up in LLM output as descriptive labels rather than named
 # entities. Storing them would pollute leaderboards and confuse joins.
 
+# Vendor / security-research orgs whose names sometimes get hallucinated
+# into the actor list. They appear in articles as the *reporters* or
+# *product owners*, not the attackers — but the LLM occasionally puts
+# them in potential_threat_actors. Filter at canonicalisation.
+_VENDOR_DENYLIST: set[str] = {
+    # Security tooling / EDR / consultancies
+    "anthropic", "openai", "microsoft", "google", "cisco", "amazon",
+    "palo alto networks", "palo alto networks researchers",
+    "mandiant", "crowdstrike", "sentinelone", "recorded future",
+    "qualys", "tenable", "rapid7", "checkmarx", "snyk",
+    "unit 42", "unit42",
+    "talos", "cisco talos", "cisco talos blog",
+    "eset", "kaspersky", "mcafee", "trend micro", "bitdefender",
+    "fortinet", "sonicwall", "f5", "akamai", "cloudflare",
+    "checkpoint", "check point",
+    "researchers", "security researchers", "threat researchers",
+    "academic researchers",
+    # Open-source project / community names
+    "github", "gitlab", "npm", "pypi",
+}
+
+# Malware family names that the LLM occasionally puts into the actor
+# field as a placeholder when the real operator is unknown. Filter from
+# actors. NOTE: We deliberately keep dual-use names (REvil, BlackCat,
+# LockBit, ALPHV) as legitimate actor candidates — those names refer
+# to operator groups too, not just the malware they ship.
+_MALWARE_NOT_ACTORS: set[str] = {
+    "mirai", "glassworm", "filemanager", "maverick", "sorvepotel",
+    "tclbanker", "tclbanker.", "etherrat", "tuktuk", "vidar",
+    "vidar stealer", "lumma", "lummac2", "lumma stealer",
+    "redline", "raccoon stealer", "stealc",
+    "shai-hulud", "mini shai-hulud",
+    "pcpjack", "cloudz", "kimwolf", "lucidrook", "deepload",
+    "canisterworm", "abcdoor", "birdcall", "squiddoor",
+    "snowrust", "snowlight", "netdraft", "finaldraft", "vshell",
+    "cloudsorcerer", "pamdoora", "valleyrat", "quasar rat",
+    "trickmo",
+}
+
+
 _GENERIC_ACTOR_PATTERNS = re.compile(
     r"""^(
             attackers?                                  # attacker, attackers
@@ -62,6 +102,10 @@ _GENERIC_ACTOR_PATTERNS = re.compile(
           | nation-state \s+ actors?
           | state-sponsored \s+ actors?
           | apt \s+ group                              # 'APT group' generic
+          | bad \s+ actors?                            # 'bad actor', 'bad actors'
+          | dprk                                       # country abbreviation
+          | (north \s+ korean | russian | chinese | iranian | belarusian)
+            \s+ .* workers?                             # '… IT workers', '(IT) workers' etc.
           # Generic country-attribution descriptors that aren't named actors:
           | (north \s+ korean | russian | chinese | iranian | belarusian)
             \s+ (hackers? | threat \s+ actors? | cyber \s+ actors? | actors?
@@ -370,8 +414,14 @@ def canonicalise_malware(raw: str | None) -> CanonResult:
 def canonicalise_actor(raw: str | None) -> CanonResult:
     """Return (canonical_name, normalised_key) for a threat-actor mention.
 
-    Returns (None, None) for generic-actor labels (Attacker / unknown /
-    suspected state-sponsored hackers / bare country names).
+    Returns (None, None) for:
+      * generic-actor labels (Attacker / unknown / suspected state-sponsored …)
+      * vendor / research-org names that LLM extraction occasionally
+        hallucinates into the actor field (Anthropic, Qualys, Unit 42, …)
+      * malware family names mistakenly placed in the actor field
+        (Mirai, GlassWorm, Filemanager, …). Dual-use names with both
+        a malware family AND a known operator group (REvil, BlackCat,
+        LockBit) are NOT filtered — those legitimately appear as actors.
     """
     if not raw or not isinstance(raw, str):
         return (None, None)
@@ -381,6 +431,8 @@ def canonicalise_actor(raw: str | None) -> CanonResult:
     if _GENERIC_ACTOR_PATTERNS.match(trimmed):
         return (None, None)
     key = _norm_key(trimmed)
+    if key in _VENDOR_DENYLIST or key in _MALWARE_NOT_ACTORS:
+        return (None, None)
     canonical = _ACTOR_ALIASES.get(key, trimmed)
     return (canonical, _norm_key(canonical))
 

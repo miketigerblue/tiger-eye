@@ -3,8 +3,11 @@
 Run after updating tiger_eye.entities to broaden generic patterns. The
 existing entity rows aren't automatically removed when a pattern change
 makes their canonical_name newly-generic — this script does that
-cleanup. CASCADE on analysis_actor / analysis_malware removes the join
-rows automatically.
+cleanup.
+
+The FK from analysis_actor / analysis_malware -> entity tables is
+ON DELETE RESTRICT (deliberate: ensures no entity is silently lost
+while still referenced). So we delete join rows first, then entities.
 """
 
 import asyncio
@@ -36,25 +39,41 @@ async def main():
         print(f"Orphan actors to delete:  {len(actor_orphans)}")
         print(f"Orphan families to delete: {len(family_orphans)}")
 
+        actor_joins_deleted = 0
         if actor_orphans:
             async with conn.transaction():
+                # FK is ON DELETE RESTRICT — join rows go first.
+                join_status = await conn.execute(
+                    "DELETE FROM analysis_actor WHERE actor_id = ANY($1::uuid[])",
+                    actor_orphans,
+                )
+                actor_joins_deleted = int(join_status.split()[-1])
                 await conn.execute(
                     "DELETE FROM threat_actors WHERE id = ANY($1::uuid[])",
                     actor_orphans,
                 )
+
+        family_joins_deleted = 0
         if family_orphans:
             async with conn.transaction():
+                join_status = await conn.execute(
+                    "DELETE FROM analysis_malware WHERE family_id = ANY($1::uuid[])",
+                    family_orphans,
+                )
+                family_joins_deleted = int(join_status.split()[-1])
                 await conn.execute(
                     "DELETE FROM malware_families WHERE id = ANY($1::uuid[])",
                     family_orphans,
                 )
+        print(f"  analysis_actor join rows deleted:   {actor_joins_deleted}")
+        print(f"  analysis_malware join rows deleted: {family_joins_deleted}")
 
         n_actors = await conn.fetchval("SELECT COUNT(*) FROM threat_actors")
         n_families = await conn.fetchval("SELECT COUNT(*) FROM malware_families")
         n_actor_links = await conn.fetchval("SELECT COUNT(*) FROM analysis_actor")
         n_family_links = await conn.fetchval("SELECT COUNT(*) FROM analysis_malware")
         print(f"\nAfter cleanup:")
-        print(f"  threat_actors:   {n_actors}")
+        print(f"  threat_actors:    {n_actors}")
         print(f"  malware_families: {n_families}")
         print(f"  analysis_actor:   {n_actor_links}")
         print(f"  analysis_malware: {n_family_links}")

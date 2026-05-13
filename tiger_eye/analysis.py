@@ -50,7 +50,14 @@ from tiger_eye.tracing import get_tracer
 
 # Bump when ANALYSIS_PROMPT semantics change. Stored on every analysis row so
 # we can A/B-compare outputs across prompt revisions.
-PROMPT_VERSION = "v2"
+#
+# v3: switched from response_format=json_object (loose) to
+#     response_format=json_schema with strict=true. The schema below
+#     enforces enums on threat_type / severity_level / IOC type, integer
+#     bounds on confidence, and object shape on key_iocs / ttps. This
+#     turns the LLM_OFF_VOCAB metric from observational into a guarantee
+#     that it stays at zero for new rows.
+PROMPT_VERSION = "v3"
 
 log = logging.getLogger(__name__)
 tracer = get_tracer()
@@ -565,13 +572,90 @@ Produce a JSON object with exactly these fields:
 Return ONLY valid JSON. No markdown, no explanation."""
 
 
+# OpenAI strict structured-output schema for the analysis call.
+# Requirements: additionalProperties: false everywhere, every property in
+# `required`, enums on closed vocabularies. With strict=True the API will
+# refuse to return malformed JSON instead of best-effort coercing it —
+# the model is constrained by the schema rather than the prompt.
+_IOC_TYPES = [
+    "ipv4", "ipv6", "domain", "url",
+    "hash_md5", "hash_sha1", "hash_sha256",
+    "email", "filename",
+]
+
+ANALYSIS_OUTPUT_SCHEMA: dict = {
+    "name": "threat_analysis",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "threat_type", "severity_level", "confidence",
+            "summary_impact", "relevance", "historical_context", "additional_notes",
+            "key_iocs", "recommended_actions", "mitigation_strategies", "attack_vectors",
+            "affected_systems_sectors", "potential_threat_actors",
+            "cve_references", "exploit_references",
+            "ttps", "tools_used", "malware_families", "target_geographies",
+        ],
+        "properties": {
+            "threat_type": {"type": "string", "enum": sorted(VALID_THREAT_TYPES)},
+            "severity_level": {"type": "string", "enum": sorted(VALID_SEVERITIES)},
+            "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+            "summary_impact": {"type": "string"},
+            "relevance": {"type": "string"},
+            "historical_context": {"type": "string"},
+            "additional_notes": {"type": "string"},
+            "key_iocs": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["type", "value"],
+                    "properties": {
+                        "type":  {"type": "string", "enum": _IOC_TYPES},
+                        "value": {"type": "string"},
+                    },
+                },
+            },
+            "recommended_actions":      {"type": "array", "items": {"type": "string"}},
+            "mitigation_strategies":    {"type": "array", "items": {"type": "string"}},
+            "attack_vectors":           {"type": "array", "items": {"type": "string"}},
+            "affected_systems_sectors": {"type": "array", "items": {"type": "string"}},
+            "potential_threat_actors":  {"type": "array", "items": {"type": "string"}},
+            "cve_references":           {"type": "array", "items": {"type": "string"}},
+            "exploit_references":       {"type": "array", "items": {"type": "string"}},
+            "ttps": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["id", "name"],
+                    "properties": {
+                        "id":   {"type": "string"},
+                        "name": {"type": "string"},
+                    },
+                },
+            },
+            "tools_used":         {"type": "array", "items": {"type": "string"}},
+            "malware_families":   {"type": "array", "items": {"type": "string"}},
+            "target_geographies": {"type": "array", "items": {"type": "string"}},
+        },
+    },
+}
+
+
 def _build_llm() -> ChatOpenAI:
     s = get_settings()
     return ChatOpenAI(
         model=s.llm_model,
         temperature=0.0,
         api_key=s.openai_api_key,
-        model_kwargs={"response_format": {"type": "json_object"}},
+        model_kwargs={
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": ANALYSIS_OUTPUT_SCHEMA,
+            },
+        },
     )
 
 

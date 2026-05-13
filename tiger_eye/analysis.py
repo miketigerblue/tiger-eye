@@ -16,7 +16,7 @@ from langchain_openai import ChatOpenAI
 from sqlalchemy import text as sql_text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from tiger_eye import __version__ as PIPELINE_VERSION
+from tiger_eye import __version__ as PIPELINE_VERSION  # noqa: N812 (uppercase = module constant idiom)
 from tiger_eye.config import get_settings
 from tiger_eye.database import (
     AnalysisActor,
@@ -29,6 +29,7 @@ from tiger_eye.database import (
     ThreatActor,
     get_db,
 )
+from tiger_eye.embedding import build_embedding_text, generate_embedding
 from tiger_eye.entities import (
     actor_category,
     actor_country,
@@ -36,7 +37,6 @@ from tiger_eye.entities import (
     canonicalise_malware,
     malware_category,
 )
-from tiger_eye.embedding import build_embedding_text, generate_embedding
 from tiger_eye.metrics import (
     ENTRIES_FAILED,
     ENTRIES_SKIPPED,
@@ -135,6 +135,7 @@ async def _link_entities(db, analysis_id: uuid.UUID, raw_actors: list, raw_famil
             )
     except Exception:
         log.exception("Entity linking failed", extra={"analysis_id": str(analysis_id)})
+
 
 # Retry config for transient LLM failures
 _LLM_MAX_RETRIES = 2
@@ -578,9 +579,15 @@ Return ONLY valid JSON. No markdown, no explanation."""
 # refuse to return malformed JSON instead of best-effort coercing it —
 # the model is constrained by the schema rather than the prompt.
 _IOC_TYPES = [
-    "ipv4", "ipv6", "domain", "url",
-    "hash_md5", "hash_sha1", "hash_sha256",
-    "email", "filename",
+    "ipv4",
+    "ipv6",
+    "domain",
+    "url",
+    "hash_md5",
+    "hash_sha1",
+    "hash_sha256",
+    "email",
+    "filename",
 ]
 
 ANALYSIS_OUTPUT_SCHEMA: dict = {
@@ -590,12 +597,25 @@ ANALYSIS_OUTPUT_SCHEMA: dict = {
         "type": "object",
         "additionalProperties": False,
         "required": [
-            "threat_type", "severity_level", "confidence",
-            "summary_impact", "relevance", "historical_context", "additional_notes",
-            "key_iocs", "recommended_actions", "mitigation_strategies", "attack_vectors",
-            "affected_systems_sectors", "potential_threat_actors",
-            "cve_references", "exploit_references",
-            "ttps", "tools_used", "malware_families", "target_geographies",
+            "threat_type",
+            "severity_level",
+            "confidence",
+            "summary_impact",
+            "relevance",
+            "historical_context",
+            "additional_notes",
+            "key_iocs",
+            "recommended_actions",
+            "mitigation_strategies",
+            "attack_vectors",
+            "affected_systems_sectors",
+            "potential_threat_actors",
+            "cve_references",
+            "exploit_references",
+            "ttps",
+            "tools_used",
+            "malware_families",
+            "target_geographies",
         ],
         "properties": {
             "threat_type": {"type": "string", "enum": sorted(VALID_THREAT_TYPES)},
@@ -612,18 +632,18 @@ ANALYSIS_OUTPUT_SCHEMA: dict = {
                     "additionalProperties": False,
                     "required": ["type", "value"],
                     "properties": {
-                        "type":  {"type": "string", "enum": _IOC_TYPES},
+                        "type": {"type": "string", "enum": _IOC_TYPES},
                         "value": {"type": "string"},
                     },
                 },
             },
-            "recommended_actions":      {"type": "array", "items": {"type": "string"}},
-            "mitigation_strategies":    {"type": "array", "items": {"type": "string"}},
-            "attack_vectors":           {"type": "array", "items": {"type": "string"}},
+            "recommended_actions": {"type": "array", "items": {"type": "string"}},
+            "mitigation_strategies": {"type": "array", "items": {"type": "string"}},
+            "attack_vectors": {"type": "array", "items": {"type": "string"}},
             "affected_systems_sectors": {"type": "array", "items": {"type": "string"}},
-            "potential_threat_actors":  {"type": "array", "items": {"type": "string"}},
-            "cve_references":           {"type": "array", "items": {"type": "string"}},
-            "exploit_references":       {"type": "array", "items": {"type": "string"}},
+            "potential_threat_actors": {"type": "array", "items": {"type": "string"}},
+            "cve_references": {"type": "array", "items": {"type": "string"}},
+            "exploit_references": {"type": "array", "items": {"type": "string"}},
             "ttps": {
                 "type": "array",
                 "items": {
@@ -631,13 +651,13 @@ ANALYSIS_OUTPUT_SCHEMA: dict = {
                     "additionalProperties": False,
                     "required": ["id", "name"],
                     "properties": {
-                        "id":   {"type": "string"},
+                        "id": {"type": "string"},
                         "name": {"type": "string"},
                     },
                 },
             },
-            "tools_used":         {"type": "array", "items": {"type": "string"}},
-            "malware_families":   {"type": "array", "items": {"type": "string"}},
+            "tools_used": {"type": "array", "items": {"type": "string"}},
+            "malware_families": {"type": "array", "items": {"type": "string"}},
             "target_geographies": {"type": "array", "items": {"type": "string"}},
         },
     },
@@ -649,7 +669,7 @@ def _build_llm() -> ChatOpenAI:
     return ChatOpenAI(
         model=s.llm_model,
         temperature=0.0,
-        api_key=s.openai_api_key,
+        api_key=s.openai_api_key,  # type: ignore[arg-type]  # langchain wants SecretStr; pydantic gives us str
         model_kwargs={
             "response_format": {
                 "type": "json_schema",
@@ -884,7 +904,9 @@ async def analyse_and_persist(
                     LLM_TOKENS.labels(model=s.llm_model, direction="prompt").inc(prompt_tokens)
                 if response_tokens:
                     LLM_TOKENS.labels(model=s.llm_model, direction="response").inc(response_tokens)
-                result = json.loads(response.content)
+                # response.content is typed as str|list in langchain >=0.1;
+                # strict json_schema mode guarantees str at runtime.
+                result = json.loads(response.content)  # type: ignore[arg-type]
                 break
             except Exception as exc:
                 last_exc = exc

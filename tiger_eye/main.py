@@ -19,7 +19,7 @@ from prometheus_client import make_asgi_app as prometheus_asgi_app
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 
-from tiger_eye import __version__ as PIPELINE_VERSION
+from tiger_eye import __version__ as PIPELINE_VERSION  # noqa: N812 (uppercase = module constant idiom)
 from tiger_eye.analysis import DLQ_MAX_ATTEMPTS, PROMPT_VERSION, analyse_and_persist
 from tiger_eye.config import get_settings
 from tiger_eye.dashboard_queries import get_analysis_detail, get_dashboard_data
@@ -85,9 +85,10 @@ async def _write_pipeline_run(
     a logging-table write must never break the enrichment loop.
     """
     try:
-        latencies = [a.latency_ms for a in analyses if getattr(a, "latency_ms", None) is not None]
-        prompt_tokens = sum((a.prompt_tokens or 0) for a in analyses if getattr(a, "prompt_tokens", None) is not None)
-        response_tokens = sum((a.response_tokens or 0) for a in analyses if getattr(a, "response_tokens", None) is not None)
+        # Explicit type narrowing so mypy understands the None-filter result.
+        latencies: list[int] = [a.latency_ms for a in analyses if a.latency_ms is not None]
+        prompt_tokens = sum((a.prompt_tokens or 0) for a in analyses if a.prompt_tokens is not None)
+        response_tokens = sum((a.response_tokens or 0) for a in analyses if a.response_tokens is not None)
 
         s = get_settings()
         row = PipelineRun(
@@ -294,7 +295,7 @@ async def enrichment_loop(wake_event: asyncio.Event | None = None):
             try:
                 await asyncio.wait_for(wake_event.wait(), timeout=s.enrich_interval)
                 wake_source = "notify"
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 wake_source = "poll"
             # Clear AFTER the wait so notifies arriving during the wait
             # collapse to one wake; clear BEFORE the next batch so any

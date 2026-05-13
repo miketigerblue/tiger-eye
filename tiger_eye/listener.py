@@ -17,6 +17,7 @@ asyncio.Task for the process lifetime; cancel on shutdown.
 """
 
 import asyncio
+import contextlib
 import logging
 
 import asyncpg
@@ -91,7 +92,5 @@ async def run_listener(wake_event: asyncio.Event) -> None:
             await asyncio.sleep(delay)
         finally:
             if conn is not None:
-                try:
+                with contextlib.suppress(Exception):
                     await conn.close()
-                except Exception:
-                    pass

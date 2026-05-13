@@ -19,11 +19,22 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from tiger_eye import __version__ as PIPELINE_VERSION
 from tiger_eye.config import get_settings
 from tiger_eye.database import (
+    AnalysisActor,
     AnalysisEmbedding,
     AnalysisEntry,
+    AnalysisMalware,
     ArchiveEntry,
     FailedEnrichment,
+    MalwareFamily,
+    ThreatActor,
     get_db,
+)
+from tiger_eye.entities import (
+    actor_category,
+    actor_country,
+    canonicalise_actor,
+    canonicalise_malware,
+    malware_category,
 )
 from tiger_eye.embedding import build_embedding_text, generate_embedding
 from tiger_eye.metrics import (
@@ -45,6 +56,78 @@ log = logging.getLogger(__name__)
 tracer = get_tracer()
 
 CVE_PATTERN = re.compile(r"CVE-\d{4}-\d{4,7}")
+
+
+async def _link_entities(db, analysis_id: uuid.UUID, raw_actors: list, raw_families: list) -> None:
+    """Canonicalise actor + malware mentions and upsert entity + join rows.
+
+    Errors here are swallowed and logged — the analysis row is the source of
+    truth, the entity tables are derived. We don't want a tag-cleanup glitch
+    to break the enrichment loop.
+    """
+    try:
+        seen_actor_ids: set = set()
+        for raw in raw_actors or []:
+            if not isinstance(raw, str):
+                continue
+            canonical, norm_key = canonicalise_actor(raw)
+            if canonical is None:
+                continue  # generic label — filtered
+            stmt = (
+                pg_insert(ThreatActor)
+                .values(
+                    canonical_name=canonical,
+                    normalised_key=norm_key,
+                    category=actor_category(canonical),
+                    attribution_country=actor_country(canonical),
+                )
+                .on_conflict_do_update(
+                    index_elements=["normalised_key"],
+                    set_={"updated_at": sql_text("now()")},
+                )
+                .returning(ThreatActor.id)
+            )
+            actor_id = (await db.execute(stmt)).scalar_one()
+            if actor_id in seen_actor_ids:
+                continue
+            seen_actor_ids.add(actor_id)
+            await db.execute(
+                pg_insert(AnalysisActor)
+                .values(analysis_id=analysis_id, actor_id=actor_id, raw_mention=raw[:255])
+                .on_conflict_do_nothing()
+            )
+
+        seen_family_ids: set = set()
+        for raw in raw_families or []:
+            if not isinstance(raw, str):
+                continue
+            canonical, norm_key = canonicalise_malware(raw)
+            if canonical is None:
+                continue
+            stmt = (
+                pg_insert(MalwareFamily)
+                .values(
+                    canonical_name=canonical,
+                    normalised_key=norm_key,
+                    category=malware_category(canonical),
+                )
+                .on_conflict_do_update(
+                    index_elements=["normalised_key"],
+                    set_={"updated_at": sql_text("now()")},
+                )
+                .returning(MalwareFamily.id)
+            )
+            family_id = (await db.execute(stmt)).scalar_one()
+            if family_id in seen_family_ids:
+                continue
+            seen_family_ids.add(family_id)
+            await db.execute(
+                pg_insert(AnalysisMalware)
+                .values(analysis_id=analysis_id, family_id=family_id, raw_mention=raw[:255])
+                .on_conflict_do_nothing()
+            )
+    except Exception:
+        log.exception("Entity linking failed", extra={"analysis_id": str(analysis_id)})
 
 # Retry config for transient LLM failures
 _LLM_MAX_RETRIES = 2
@@ -810,6 +893,17 @@ async def analyse_and_persist(entry: ArchiveEntry) -> AnalysisEntry | None:
             log.exception("Persist failed", extra={"guid": entry.guid})
             await _record_failure(entry.guid, "persist", exc)
             return None
+
+        # Entity linking — derived data, runs in its own transaction so a
+        # canonicalisation glitch can't roll back the analysis itself.
+        async with get_db() as db:
+            await _link_entities(
+                db,
+                analysis_id,
+                result.get("potential_threat_actors") or [],
+                result.get("malware_families") or [],
+            )
+            await db.commit()
 
         log.info(
             "Enriched entry",

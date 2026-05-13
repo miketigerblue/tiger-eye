@@ -279,9 +279,14 @@ SELECT
     additional_notes,
     key_iocs,
     recommended_actions,
+    -- Restored in PR #22 (v3 schema): defensive controls + how-it-arrives
+    -- + PoC/advisory URLs, all separated from the response-action list.
+    mitigation_strategies,
+    attack_vectors,
     affected_systems_sectors,
     potential_threat_actors,
     cve_references,
+    exploit_references,
     ttps,
     tools_used,
     malware_families,
@@ -290,6 +295,16 @@ SELECT
     COALESCE(source_name, 'unknown')                          AS src,
     COALESCE(source_url, '')                                  AS url,
     feed_title,
+    -- Provenance (PR #22) — surface for the detail drawer's footer.
+    model_id,
+    prompt_version,
+    pipeline_version,
+    prompt_tokens,
+    response_tokens,
+    latency_ms,
+    encode(input_hash, 'hex')                                 AS input_hash,
+    -- Pipeline run (PR #29) — links back to the cycle that produced this row.
+    run_id::text                                              AS run_id,
     to_char(analysed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS analysed_at,
     EXTRACT(EPOCH FROM analysed_at)::bigint                   AS ts
 FROM analysis

@@ -674,6 +674,17 @@
     }
     .kv-grid dd { color: var(--text); }
     .kv-grid dd .sev { vertical-align: 1px; }
+    .kv-grid dd .mono,
+    code.mono {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 10.5px;
+        color: var(--text-faint);
+        background: var(--bg-elev);
+        padding: 1px 5px;
+        border-radius: 3px;
+    }
+    /* Provenance footer — subtler than the attribution grid above it. */
+    .prov-grid { opacity: 0.78; margin-top: 4px; }
 
     .tag-list {
         display: flex;
@@ -1414,6 +1425,14 @@ function renderDrawer(r) {
             arr(r.cve_references).map(c => `<span class="tag accent">${escapeHTML(c)}</span>`).join('')
         }</div>`));
     }
+    if (arr(r.exploit_references).length) {
+        sections.push(section('Exploit / advisory references', `<ul class="action-list">${
+            arr(r.exploit_references).map(u => {
+                const href = escapeHTML(u);
+                return `<li><a href="${href}" target="_blank" rel="noopener">${href} ↗</a></li>`;
+            }).join('')
+        }</ul>`));
+    }
     if (arr(r.ttps).length) {
         sections.push(section('MITRE ATT&amp;CK', `<div class="tag-list">${
             arr(r.ttps).map(t => {
@@ -1423,14 +1442,24 @@ function renderDrawer(r) {
             }).join('')
         }</div>`));
     }
+    if (arr(r.attack_vectors).length) {
+        sections.push(section('Attack vectors', `<div class="tag-list">${
+            arr(r.attack_vectors).map(v => `<span class="tag">${escapeHTML(v)}</span>`).join('')
+        }</div>`));
+    }
     if (arr(r.key_iocs).length) {
         sections.push(section('Indicators', `<table class="ioc-table">${
             arr(r.key_iocs).map(i => `<tr><td class="type">${escapeHTML(i.type || 'unknown')}</td><td class="val">${escapeHTML(i.value || '')}</td></tr>`).join('')
         }</table>`));
     }
     if (arr(r.recommended_actions).length) {
-        sections.push(section('Recommended actions', `<ul class="action-list">${
+        sections.push(section('Recommended actions (immediate response)', `<ul class="action-list">${
             arr(r.recommended_actions).map(a => `<li>${escapeHTML(a)}</li>`).join('')
+        }</ul>`));
+    }
+    if (arr(r.mitigation_strategies).length) {
+        sections.push(section('Mitigation strategies (durable controls)', `<ul class="action-list">${
+            arr(r.mitigation_strategies).map(m => `<li>${escapeHTML(m)}</li>`).join('')
         }</ul>`));
     }
 
@@ -1450,6 +1479,35 @@ function renderDrawer(r) {
 
     if (r.url) {
         sections.push(section('Source', `<a class="source-link" href="${escapeHTML(r.url)}" target="_blank" rel="noopener">${escapeHTML(r.url)} ↗</a>`));
+    }
+
+    // Provenance footer — PR #22 (per-row provenance) + PR #29 (run_id link).
+    // Surfaces model / prompt / pipeline versions, token cost, latency, and
+    // the run + input_hash. Useful for analyst auditability and for
+    // debugging "why does this analysis look different from yesterday's?"
+    const prov = [];
+    if (r.model_id)         prov.push(['Model',     escapeHTML(r.model_id)]);
+    if (r.prompt_version)   prov.push(['Prompt',    escapeHTML(r.prompt_version)]);
+    if (r.pipeline_version) prov.push(['Pipeline',  escapeHTML(r.pipeline_version)]);
+    if (r.prompt_tokens != null || r.response_tokens != null) {
+        const pin  = r.prompt_tokens   ?? '—';
+        const pout = r.response_tokens ?? '—';
+        prov.push(['Tokens', `${pin} in / ${pout} out`]);
+    }
+    if (r.latency_ms != null) prov.push(['Latency', `${r.latency_ms} ms`]);
+    if (r.run_id) {
+        prov.push(['Run',
+            `<code class="mono">${escapeHTML(r.run_id)}</code>`]);
+    }
+    if (r.input_hash) {
+        const short = r.input_hash.slice(0, 16);
+        prov.push(['Input hash',
+            `<code class="mono" title="SHA-256 of normalised LLM input">${escapeHTML(short)}…</code>`]);
+    }
+    if (prov.length) {
+        sections.push(section('Provenance', `<dl class="kv-grid prov-grid">${
+            prov.map(([k,v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')
+        }</dl>`));
     }
 
     body.innerHTML = sections.join('');

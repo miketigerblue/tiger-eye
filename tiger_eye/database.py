@@ -269,6 +269,12 @@ class AnalysisEntry(Base):
     # silently re-edits an article and skip identical-input re-enrichment.
     input_hash: Mapped[bytes | None] = mapped_column(LargeBinary)
 
+    # Optional link to the pipeline_runs row that produced this analysis.
+    # NULL for analyses written before migration 007.
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("pipeline_runs.run_id", ondelete="SET NULL")
+    )
+
     # Relationship
     embedding: Mapped["AnalysisEmbedding | None"] = relationship(
         back_populates="analysis", uselist=False, cascade="all, delete-orphan"
@@ -293,6 +299,42 @@ class AnalysisEmbedding(Base):
 
     # Relationship
     analysis: Mapped["AnalysisEntry"] = relationship(back_populates="embedding")
+
+
+class PipelineRun(Base):
+    """One row per enrichment cycle that did work. Pairs with the per-row
+    provenance on AnalysisEntry (model_id, prompt_tokens, latency_ms, …)
+    to give run-level cost / latency observability.
+
+    Empty polls (batch_size = 0) don't write a row.
+    """
+
+    __tablename__ = "pipeline_runs"
+
+    run_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, server_default=text("uuid_generate_v4()"))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+
+    batch_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    enriched_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    skipped_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    prompt_tokens_total: Mapped[int | None] = mapped_column(Integer)
+    response_tokens_total: Mapped[int | None] = mapped_column(Integer)
+
+    llm_p50_ms: Mapped[int | None] = mapped_column(Integer)
+    llm_p95_ms: Mapped[int | None] = mapped_column(Integer)
+    llm_max_ms: Mapped[int | None] = mapped_column(Integer)
+
+    model_id: Mapped[str | None] = mapped_column(Text)
+    prompt_version: Mapped[str | None] = mapped_column(Text)
+    pipeline_version: Mapped[str | None] = mapped_column(Text)
+
+    wake_source: Mapped[str | None] = mapped_column(Text)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
 
 
 class ThreatActor(Base):

@@ -227,3 +227,64 @@ async def search_by_text(query_text: str, n_results: int = 10) -> list[dict]:
 async def search_by_vector(embedding: list[float], n_results: int = 10) -> list[dict]:
     """Nearest-neighbour search by pre-computed vector."""
     return await _vector_search(embedding, n_results=n_results)
+
+
+# ---------------------------------------------------------------------------
+# Hybrid search — RRF fusion of pgvector + Postgres FTS
+# ---------------------------------------------------------------------------
+# Use this when the caller cares about *both* semantic similarity AND
+# exact-token matches (CVE IDs, product names like PAN-OS, hash values).
+# Pure semantic search can miss verbatim tokens; pure FTS misses paraphrase.
+# Reciprocal Rank Fusion gives both retrievals a vote.
+
+# Defaults: balanced 50/50. This is empirically the best default across
+# both use cases tested:
+#   * "CVE-2026-41940" (pure FTS lookup) — finds the exact-match articles
+#   * "Mini Shai-Hulud worm npm" (mixed) — both rankings agree on the top
+#     hits, score-doubles them, surfaces them above either ranking alone
+# Callers wanting CVE-style exact-lookup can pass (sim=0.3, fts=0.7);
+# callers wanting paraphrase-tolerant RAG can pass (sim=0.7, fts=0.3).
+HYBRID_SIM_WEIGHT = 0.5
+HYBRID_FTS_WEIGHT = 0.5
+
+
+async def hybrid_search(
+    query_text: str,
+    n_results: int = 10,
+    sim_weight: float = HYBRID_SIM_WEIGHT,
+    fts_weight: float = HYBRID_FTS_WEIGHT,
+    candidate_pool: int = 50,
+    max_distance: float = 0.65,
+) -> list[dict]:
+    """Hybrid search — embeds the query, then calls the hybrid_search()
+    SQL function which fuses pgvector cosine ranking with FTS ranking
+    via Reciprocal Rank Fusion (Cormack et al., k=60).
+
+    Returns rows with extra fields beyond _vector_search:
+      * rank_sim, rank_fts      — position in each individual ranking
+      * fts_score                — raw ts_rank value
+      * combined_score          — RRF-fused score (higher is better)
+    """
+    query_vec = await generate_embedding(query_text)
+    async with get_db() as db:
+        result = await db.execute(
+            sql_text(
+                """
+                SELECT *
+                FROM hybrid_search(
+                    :q, CAST(:vec AS vector),
+                    :n, :sw, :fw, :pool, :max_dist
+                )
+                """
+            ),
+            {
+                "q": query_text,
+                "vec": str(query_vec),
+                "n": n_results,
+                "sw": sim_weight,
+                "fw": fts_weight,
+                "pool": candidate_pool,
+                "max_dist": max_distance,
+            },
+        )
+        return [dict(r._mapping) for r in result.fetchall()]

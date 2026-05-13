@@ -67,10 +67,19 @@ async def test_analysis_table_schema():
     assert "key_iocs" in columns
     assert "ttps" in columns
     assert "embedding_text" in columns
-    # Dropped columns should not exist
-    assert "attack_vectors" not in columns
-    assert "exploit_references" not in columns
-    assert "mitigation_strategies" not in columns
+    # Restored from the v0 schema in PR #22 — see CHANGELOG v0.2.0.
+    # mitigation_strategies is the durable defensive controls field
+    # (split out of recommended_actions); attack_vectors describes how
+    # the threat reaches the target; exploit_references is PoC/advisory
+    # URLs (split out of cve_references).
+    assert "attack_vectors" in columns
+    assert "exploit_references" in columns
+    assert "mitigation_strategies" in columns
+    # Provenance (PR #22) and pipeline_runs FK (PR #29)
+    assert "model_id" in columns
+    assert "prompt_version" in columns
+    assert "input_hash" in columns
+    assert "run_id" in columns
 
 
 @pytest.mark.anyio

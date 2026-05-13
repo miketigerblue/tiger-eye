@@ -83,11 +83,83 @@ _VENDOR_DENYLIST: set[str] = {
     "security researchers",
     "threat researchers",
     "academic researchers",
-    # Open-source project / community names
+    # Research / OEM / spyware that show up tagged-as-actor but aren't ops groups
+    "google project zero",
+    "project zero",
+    "jfrog",
+    "jfrog security research",
+    "qualys threat research unit",
+    "qualys threat research unit (tru)",
+    "qualys tru",
+    "cloud security alliance",
+    "cloud security alliance (csa)",
+    "csa",
+    "apple",
+    "ibm",
+    "ibm x-force",
+    "x-force",
+    "nccgroup",
+    "ncc group",
+    "blackberry",
+    "blackberry research",
+    "huntress",
+    "huntress labs",
+    "wiz",
+    "wiz research",
+    "trustwave",
+    "secureworks",
+    "intel471",
+    "intel 471",
+    "dragos",
+    "claroty",
+    "armis",
+    "checkmarx labs",
+    # Law enforcement / regulators / governments (sources, not attackers)
+    "fbi",
+    "cisa",
+    "nsa",
+    "europol",
+    "interpol",
+    "ncsc",
+    "ncsc-uk",
+    "german authorities",
+    "us authorities",
+    "uk authorities",
+    "french authorities",
+    "dutch authorities",
+    "chinese authorities",
+    # Open-source project / community names / forums (places, not actors)
     "github",
     "gitlab",
     "npm",
     "pypi",
+    "breachforums",
+    "raidforums",
+    "xss.is",
+    "exploit.in",
+}
+
+# Individual researchers / journalists / engineers that the LLM has placed
+# into potential_threat_actors. These are humans, not threat actors. Curate
+# observed examples; expand as more leak through. (A future "type=person"
+# category on threat_actors would be the right structural fix.)
+_INDIVIDUAL_DENYLIST: set[str] = {
+    "jann horn",
+    "angelo martino",
+    "tavis ormandy",
+    "brian krebs",
+    "matt suiche",
+    "mark russinovich",
+    "kevin beaumont",
+    "dan goodin",
+    "lawrence abrams",
+    "bill toulas",
+    "ionut ilascu",
+    "sergiu gatlan",
+    "ravie lakshmanan",
+    "pierluigi paganini",
+    "graham cluley",
+    "cambodian senator",  # appeared as victim/named individual
 }
 
 # Malware family names that the LLM occasionally puts into the actor
@@ -97,6 +169,7 @@ _VENDOR_DENYLIST: set[str] = {
 # to operator groups too, not just the malware they ship.
 _MALWARE_NOT_ACTORS: set[str] = {
     "mirai",
+    "aisuru",  # Mirai-based IoT botnet (2025) — malware, not actor
     "glassworm",
     "filemanager",
     "maverick",
@@ -134,6 +207,8 @@ _MALWARE_NOT_ACTORS: set[str] = {
     "valleyrat",
     "quasar rat",
     "trickmo",
+    "vect 2.0",
+    "vect2.0",
 }
 
 
@@ -165,15 +240,30 @@ _GENERIC_ACTOR_PATTERNS = re.compile(
           | (north \s+ korean | russian | chinese | iranian | belarusian)
             \s+ .* workers?                             # '… IT workers', '(IT) workers' etc.
           # Generic country-attribution descriptors that aren't named actors:
-          | (north \s+ korean | russian | chinese | iranian | belarusian)
+          | (north \s+ korean | russian | chinese | iranian | belarusian
+             | israeli | indian | pakistani | turkish | brazilian
+             | ukrainian | korean | japanese | vietnamese | dprk)
             \s+ (hackers? | threat \s+ actors? | cyber \s+ actors? | actors?
                  | state \s+ actors? | apt s? | apt \s+ groups? | operators?
-                 | cybercriminals? | nationals?)
+                 | cybercriminals? | nationals? | developers? | spies?
+                 | nationals?)
+          # "China-linked Y", "DPRK-nexus Y", "Iranian-linked hackers" etc.
+          | (north[\s-]korean | dprk | russian | chinese | iranian | belarusian
+             | israeli | indian | pakistani | korean | japanese | vietnamese
+             | china | russia | iran | north[\s-]korea | israel | india
+             | pakistan | brazil | ukraine | turkey)
+            [\s-]
+            (linked | nexus | aligned | backed | sponsored | based | affiliated)
+            \s+ (hackers? | threat \s+ actors? | cyber \s+ actors? | actors?
+                 | state \s+ actors? | apt s? | apt \s+ groups? | operators?
+                 | cybercriminals? | hacker \s+ groups?)
+          | criminal \s+ (organizations? | organisations? | groups?)
           | china \s+ apt                              # 'China APT' is too generic alone
           | china                                      # bare country names
           | russia
           | iran
           | north \s+ korea
+          | israel
           | unidentified \s+ \w+
        )$""",
     re.IGNORECASE | re.VERBOSE,
@@ -431,44 +521,140 @@ _ACTOR_ALIASES: dict[str, str] = {
     "muddled libra": "Scattered Spider",
     "uat-8302": "UAT-8302",
     "uat8302": "UAT-8302",
+    # ===== Additional well-known APTs / threat groups =====
+    # Russia
+    "apt28 (gru)": "APT28",
+    "gru": "APT28",  # the GRU operates APT28; collapse for analytical leaderboards
+    "bluedelta": "APT28",
+    "snake": "Turla",
+    "turla": "Turla",
+    "venomous bear": "Turla",
+    # China — expanded
+    "famoussparrow": "FamousSparrow",
+    "famous sparrow": "FamousSparrow",
+    "silk typhoon": "Silk Typhoon",
+    "hafnium": "Silk Typhoon",
+    "earth lamia": "Earth Lamia",
+    "uat-10608": "UAT-10608",
+    # North Korea — expanded
+    "apt37": "APT37",
+    "inkysquid": "APT37",
+    "reaper": "APT37",
+    "scarcruft": "ScarCruft",
+    "contagious interview": "Contagious Interview",
+    # Iran — expanded
+    "muddywater": "MuddyWater",
+    "mercury": "MuddyWater",
+    "static kitten": "MuddyWater",
+    "handala": "Handala",
+    "handala hack team": "Handala",
+    "handala hack": "Handala",
+    # eCrime / ransomware affiliates — now have categories below
+    "lapsus$": "LAPSUS$",
+    "lapsus": "LAPSUS$",
+    "revil": "REvil",
+    "sodinokibi": "REvil",
+    "blackcat": "BlackCat",
+    "blackcat (alphv)": "BlackCat",
+    "alphv": "BlackCat",
+    "gandcrab": "GandCrab",
+    "qilin": "Qilin",
+    "agenda": "Qilin",
+    "ransomhub": "RansomHub",
+    "interlock": "Interlock",
+    "interlock ransomware group": "Interlock",
+    "storm-1175": "Storm-1175",
+    # Mandiant / Microsoft tracked clusters
+    "unc6692": "UNC6692",
+    # Commercial surveillance / mercenary-spyware
+    "intellexa": "Intellexa",
+    "nso group": "NSO Group",
+    "nso": "NSO Group",
+    "candiru": "Candiru",
 }
 
 _ACTOR_CATEGORY: dict[str, str] = {
-    # state-sponsored
+    # state-sponsored — Russia
     "APT28": "state-sponsored",
     "APT29": "state-sponsored",
     "Sandworm": "state-sponsored",
+    "Turla": "state-sponsored",
+    # state-sponsored — China
     "APT41": "state-sponsored",
     "Volt Typhoon": "state-sponsored",
     "Mustang Panda": "state-sponsored",
     "Salt Typhoon": "state-sponsored",
     "Flax Typhoon": "state-sponsored",
+    "UAT-8302": "state-sponsored",
+    "FamousSparrow": "state-sponsored",
+    "Silk Typhoon": "state-sponsored",
+    "Earth Lamia": "state-sponsored",
+    "UAT-10608": "state-sponsored",
+    # state-sponsored — North Korea
     "Lazarus Group": "state-sponsored",
     "Kimsuky": "state-sponsored",
+    "APT37": "state-sponsored",
+    "ScarCruft": "state-sponsored",
+    "Contagious Interview": "state-sponsored",
+    # state-sponsored — Iran
     "APT33": "state-sponsored",
     "APT34": "state-sponsored",
-    "UAT-8302": "state-sponsored",
-    # eCrime
+    "MuddyWater": "state-sponsored",
+    # Mandiant / vendor-tracked clusters (unattributed but operator-class)
+    "UNC6692": "state-sponsored",
+    # hacktivist
+    "Handala": "hacktivist",
+    # commercial spyware vendors (mercenary surveillance, not state-aligned ops groups)
+    "Intellexa": "commercial-spyware",
+    "NSO Group": "commercial-spyware",
+    "Candiru": "commercial-spyware",
+    # eCrime / ransomware affiliates
     "ShinyHunters": "cybercrime",
     "FIN7": "cybercrime",
     "Scattered Spider": "cybercrime",
     "TeamPCP": "cybercrime",
+    "LAPSUS$": "cybercrime",
+    "REvil": "cybercrime",
+    "BlackCat": "cybercrime",
+    "GandCrab": "cybercrime",
+    "Qilin": "cybercrime",
+    "RansomHub": "cybercrime",
+    "Interlock": "cybercrime",
+    "Storm-1175": "cybercrime",
 }
 
 _ACTOR_COUNTRY: dict[str, str] = {
+    # Russia
     "APT28": "RU",
     "APT29": "RU",
     "Sandworm": "RU",
+    "Turla": "RU",
+    # China
     "APT41": "CN",
     "Volt Typhoon": "CN",
     "Mustang Panda": "CN",
     "Salt Typhoon": "CN",
     "Flax Typhoon": "CN",
     "UAT-8302": "CN",
+    "FamousSparrow": "CN",
+    "Silk Typhoon": "CN",
+    "Earth Lamia": "CN",
+    "UAT-10608": "CN",
+    # North Korea
     "Lazarus Group": "KP",
     "Kimsuky": "KP",
+    "APT37": "KP",
+    "ScarCruft": "KP",
+    "Contagious Interview": "KP",
+    # Iran
     "APT33": "IR",
     "APT34": "IR",
+    "MuddyWater": "IR",
+    "Handala": "IR",
+    # Commercial spyware vendors (vendor HQ country)
+    "Intellexa": "GR",  # Greece-based group (also Israeli ties)
+    "NSO Group": "IL",
+    "Candiru": "IL",
 }
 
 
@@ -504,6 +690,8 @@ def canonicalise_actor(raw: str | None) -> CanonResult:
       * generic-actor labels (Attacker / unknown / suspected state-sponsored …)
       * vendor / research-org names that LLM extraction occasionally
         hallucinates into the actor field (Anthropic, Qualys, Unit 42, …)
+      * individual researcher / journalist names that surface as
+        potential actors (Jann Horn, Brian Krebs, Tavis Ormandy, …)
       * malware family names mistakenly placed in the actor field
         (Mirai, GlassWorm, Filemanager, …). Dual-use names with both
         a malware family AND a known operator group (REvil, BlackCat,
@@ -517,7 +705,7 @@ def canonicalise_actor(raw: str | None) -> CanonResult:
     if _GENERIC_ACTOR_PATTERNS.match(trimmed):
         return (None, None)
     key = _norm_key(trimmed)
-    if key in _VENDOR_DENYLIST or key in _MALWARE_NOT_ACTORS:
+    if key in _VENDOR_DENYLIST or key in _INDIVIDUAL_DENYLIST or key in _MALWARE_NOT_ACTORS:
         return (None, None)
     canonical = _ACTOR_ALIASES.get(key, trimmed)
     return (canonical, _norm_key(canonical))

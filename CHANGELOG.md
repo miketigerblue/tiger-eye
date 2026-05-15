@@ -7,6 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+Post-`0.2.0` work — bug fixes, CI green-up, UI/UX surfacing of the v0.2.0
+data model, and a critical regression in the pipeline_runs FK ordering.
+Not yet tagged; will roll into `0.3.0` when ready.
+
+### Added
+
+#### UI / dashboard (PR #34, #35)
+- Detail drawer now exposes the v0.2.0 analysis fields: `mitigation_strategies`,
+  `attack_vectors`, `exploit_references`, `threat_type`, `entry_title`, and a
+  provenance footer (`model_id` / `prompt_version` / `pipeline_version` /
+  token counts / `latency_ms`).
+- **Priority badges** (`P0`/`P1`/`P2`/`P3`) on the top-CVE table, derived
+  from CVSS × EPSS × KEV × known-ransomware-use.
+- **KEV / ransomware pills** on CVE rows referencing the KEV catalogue.
+- **Enriched entity chips** in the drawer: `cves_enriched`, `actors_enriched`,
+  `malware_enriched` arrays render with category + country-flag emoji.
+- Sortable CVE table, feed filters, keyboard shortcuts.
+
+### Changed
+
+#### Entity curation (PR #36)
+- New `_INDIVIDUAL_DENYLIST` in `tiger_eye/entities.py` for researcher /
+  journalist names that the LLM occasionally tags as actors (Jann Horn,
+  Tavis Ormandy, Brian Krebs, …). Wired into `canonicalise_actor`.
+- `_VENDOR_DENYLIST` extended with security-research orgs (Project Zero,
+  JFrog, IBM X-Force, Huntress, Wiz, Trustwave, Secureworks, Intel471,
+  Dragos, Claroty, Armis), law-enforcement / national agencies (FBI,
+  CISA, NSA, Europol, NCSC, national authorities), and forums
+  (BreachForums, xss.is, exploit.in).
+- `_GENERIC_ACTOR_PATTERNS` regex broadened to catch *X-linked / -nexus
+  / -aligned hackers / threat actors / operators* across more countries.
+- `_ACTOR_ALIASES` extended with ~25 groups: Turla / Snake / Venomous
+  Bear, FamousSparrow, Silk Typhoon / Hafnium, Earth Lamia, UAT-10608,
+  APT37 / InkySquid / Reaper, ScarCruft, Contagious Interview,
+  MuddyWater, Handala, LAPSUS$, REvil / Sodinokibi (actor), BlackCat /
+  ALPHV (actor), GandCrab, Qilin / Agenda, RansomHub, Interlock,
+  Storm-1175, UNC6692, Intellexa, NSO Group, Candiru.
+- New `hacktivist` and `commercial-spyware` actor categories.
+- New `scripts/backfill_actor_categories.py` — one-shot backfill for
+  `category` / `attribution_country` columns on existing rows.
+
+### Fixed
+
+#### Pipeline observability — FK ordering bug
+- **Critical: `pipeline_runs` row is now created BEFORE analyses are
+  persisted.** PR #29 added `analysis.run_id` with `FK → pipeline_runs`,
+  but the loop wrote the `pipeline_runs` row only at cycle end — causing
+  every `analyse_and_persist` to fail with `ForeignKeyViolationError` on
+  `analysis_run_id_fkey`. Symptom in prod: 153 consecutive runs / 0
+  enrichments / 500 DLQ failures.
+- Split `_write_pipeline_run` into `_create_pipeline_run` (cycle start,
+  inserts initial row with `run_id` + `started_at` + static metadata) and
+  `_finalize_pipeline_run` (cycle end, UPDATEs with stats / token totals
+  / latency percentiles). If the initial create fails, analyses fall back
+  to `run_id=None` — the column is nullable specifically for this case.
+
+#### CI green-up (PR #31, #32, #33)
+- **Lint stage** green: ruff (`I001` import order, `UP041`
+  `asyncio.TimeoutError` → builtin, `SIM105` `try/except: pass` →
+  `contextlib.suppress`, `N812` annotated for `PIPELINE_VERSION` dunder
+  source); ruff format; mypy.
+- **Integration tests**: `test_analysis_table_schema` updated to assert
+  that PR #22's restored fields (`attack_vectors`, `exploit_references`,
+  `mitigation_strategies`) and PR #29's `run_id` / provenance columns are
+  present.
+- **Dependency audit**: upgrade pip before `pip-audit` (pip 26.0.1 has
+  CVE-2026-3219 / CVE-2026-6357; pip-audit's self-scan was failing CI).
+
+### Companion changes in `tigerfetch`
+- **KEV ingestor bug fixed** (PR #15 / #16) — `KevVuln` struct was
+  silently dropping `KnownRansomwareCampaignUse` and `CWEs` on JSON
+  round-trip. After fix + rebuild + refresh: 318 ransomware-known +
+  1,423 CVEs with CWE arrays populated in `tiger2go.public.cve_kev`.
+
+### Pull requests
+- #31 — fix(ci): make Lint stage green
+- #32 — fix(tests): assert restored analysis columns
+- #33 — fix(ci): upgrade pip before pip-audit
+- #34 — feat(api): expose v0.2.0 analysis fields in detail drawer
+- #35 — feat(ui): priority badges + KEV/ransomware indicators + entity chips
+- #36 — chore(entities): pass-2 curation
+- _(this PR)_ — fix(loop): create pipeline_runs row before analyses persist
+
+---
+
 ## [0.2.0] - 2026-05-13
 
 The "exceptionally awesome" release. Tier-1 of the no-info-loss / observability /

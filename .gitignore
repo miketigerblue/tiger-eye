@@ -20,3 +20,6 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local archive snapshot metadata (logs, sha, meta) — see R2 osint-r2:tigerblue-archive/ for canonical copy
+.archive-meta/

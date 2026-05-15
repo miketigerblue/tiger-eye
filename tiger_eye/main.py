@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from prometheus_client import make_asgi_app as prometheus_asgi_app
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 
 from tiger_eye import __version__ as PIPELINE_VERSION  # noqa: N812 (uppercase = module constant idiom)
 from tiger_eye.analysis import DLQ_MAX_ATTEMPTS, PROMPT_VERSION, analyse_and_persist
@@ -68,55 +68,80 @@ def _percentile(values: list[int], pct: float) -> int | None:
     return s[min(idx, len(s) - 1)]
 
 
-async def _write_pipeline_run(
+async def _create_pipeline_run(
     *,
     run_id: uuid.UUID,
     started_at: datetime,
-    finished_at: datetime,
     batch_size: int,
-    enriched_count: int,
-    failed_count: int,
-    analyses: list[AnalysisEntry],
     wake_source: str,
     consecutive_failures: int,
-    failure_reason: str | None = None,
-) -> None:
-    """Insert a pipeline_runs row summarising this cycle. Best-effort —
-    a logging-table write must never break the enrichment loop.
+) -> bool:
+    """Insert the *initial* pipeline_runs row so analysis.run_id FK resolves.
+
+    Returns True on success. If we can't write this logging row, return
+    False so the caller can null-out run_id on analyses and avoid the FK
+    violation that would otherwise kill the whole batch.
     """
     try:
-        # Explicit type narrowing so mypy understands the None-filter result.
-        latencies: list[int] = [a.latency_ms for a in analyses if a.latency_ms is not None]
-        prompt_tokens = sum((a.prompt_tokens or 0) for a in analyses if a.prompt_tokens is not None)
-        response_tokens = sum((a.response_tokens or 0) for a in analyses if a.response_tokens is not None)
-
         s = get_settings()
         row = PipelineRun(
             run_id=run_id,
             started_at=started_at,
-            finished_at=finished_at,
-            duration_ms=int((finished_at - started_at).total_seconds() * 1000),
             batch_size=batch_size,
-            enriched_count=enriched_count,
-            failed_count=failed_count,
+            enriched_count=0,
+            failed_count=0,
             skipped_count=0,
-            prompt_tokens_total=prompt_tokens or None,
-            response_tokens_total=response_tokens or None,
-            llm_p50_ms=_percentile(latencies, 0.50),
-            llm_p95_ms=_percentile(latencies, 0.95),
-            llm_max_ms=max(latencies) if latencies else None,
             model_id=s.llm_model,
             prompt_version=PROMPT_VERSION,
             pipeline_version=PIPELINE_VERSION,
             wake_source=wake_source,
             consecutive_failures=consecutive_failures,
-            failure_reason=failure_reason,
         )
         async with get_db() as db:
             db.add(row)
             await db.commit()
+        return True
     except Exception:
-        log.exception("Failed to write pipeline_runs row", extra={"run_id": str(run_id)})
+        log.exception("Failed to create pipeline_runs row", extra={"run_id": str(run_id)})
+        return False
+
+
+async def _finalize_pipeline_run(
+    *,
+    run_id: uuid.UUID,
+    started_at: datetime,
+    finished_at: datetime,
+    enriched_count: int,
+    failed_count: int,
+    analyses: list[AnalysisEntry],
+    failure_reason: str | None = None,
+) -> None:
+    """Fill in the per-cycle stats on the pipeline_runs row created at cycle start."""
+    try:
+        latencies: list[int] = [a.latency_ms for a in analyses if a.latency_ms is not None]
+        prompt_tokens = sum((a.prompt_tokens or 0) for a in analyses if a.prompt_tokens is not None)
+        response_tokens = sum((a.response_tokens or 0) for a in analyses if a.response_tokens is not None)
+
+        async with get_db() as db:
+            await db.execute(
+                update(PipelineRun)
+                .where(PipelineRun.run_id == run_id)
+                .values(
+                    finished_at=finished_at,
+                    duration_ms=int((finished_at - started_at).total_seconds() * 1000),
+                    enriched_count=enriched_count,
+                    failed_count=failed_count,
+                    prompt_tokens_total=prompt_tokens or None,
+                    response_tokens_total=response_tokens or None,
+                    llm_p50_ms=_percentile(latencies, 0.50),
+                    llm_p95_ms=_percentile(latencies, 0.95),
+                    llm_max_ms=max(latencies) if latencies else None,
+                    failure_reason=failure_reason,
+                )
+            )
+            await db.commit()
+    except Exception:
+        log.exception("Failed to finalize pipeline_runs row", extra={"run_id": str(run_id)})
 
 
 # ---------------------------------------------------------------------------
@@ -200,9 +225,22 @@ async def enrichment_loop(wake_event: asyncio.Event | None = None):
                 BATCH_SIZE.observe(len(entries))
                 log.info("Found entries to enrich", extra={"count": len(entries)})
 
+                # Insert the pipeline_runs row BEFORE any analyses so that
+                # the analysis.run_id FK resolves. If this insert fails
+                # (logging table outage / migration issue), pass run_id=None
+                # to analyses instead of letting every persist FK-violate.
+                run_row_ok = await _create_pipeline_run(
+                    run_id=run_id,
+                    started_at=cycle_started_at,
+                    batch_size=len(entries),
+                    wake_source=wake_source,
+                    consecutive_failures=_consecutive_failures,
+                )
+                effective_run_id = run_id if run_row_ok else None
+
                 sem = asyncio.Semaphore(_CONCURRENCY)
 
-                async def _bounded_enrich(e, _sem=sem, _run_id=run_id):
+                async def _bounded_enrich(e, _sem=sem, _run_id=effective_run_id):
                     async with _sem:
                         return await analyse_and_persist(e, run_id=_run_id)
 
@@ -236,23 +274,20 @@ async def enrichment_loop(wake_event: asyncio.Event | None = None):
                     extra={"enriched": enriched, "failed": failures, "total": len(entries)},
                 )
 
-                # Write the pipeline_runs row summarising this cycle.
-                # Empty polls don't reach here (the `if not entries` branch
-                # above continues to the wait), so every row we write
-                # represents a cycle that did work.
+                # Fill in the per-cycle stats on the pipeline_runs row we
+                # created at cycle start. If the initial create failed,
+                # there's no row to update — skip silently.
                 enriched_analyses = [r for r in results if isinstance(r, AnalysisEntry)]
-                await _write_pipeline_run(
-                    run_id=run_id,
-                    started_at=cycle_started_at,
-                    finished_at=datetime.now(UTC),
-                    batch_size=len(entries),
-                    enriched_count=enriched,
-                    failed_count=failures,
-                    analyses=enriched_analyses,
-                    wake_source=wake_source,
-                    consecutive_failures=_consecutive_failures,
-                    failure_reason=("all entries failed" if failures == len(entries) else None),
-                )
+                if run_row_ok:
+                    await _finalize_pipeline_run(
+                        run_id=run_id,
+                        started_at=cycle_started_at,
+                        finished_at=datetime.now(UTC),
+                        enriched_count=enriched,
+                        failed_count=failures,
+                        analyses=enriched_analyses,
+                        failure_reason=("all entries failed" if failures == len(entries) else None),
+                    )
 
                 if failures == len(entries):
                     _consecutive_failures += 1

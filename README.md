@@ -223,6 +223,7 @@ tiger-eye/
 
 - **[SYSTEM_DESIGN.md](SYSTEM_DESIGN.md)** -- full architecture specification with C1/C2/C3 diagrams, failure mode matrix, performance characteristics, and live system snapshot
 - **[SECURITY.md](SECURITY.md)** -- vulnerability disclosure policy (security@tigerblue.tech, 48h ack SLA, 30d fix SLA)
+- **[docs/MIGRATION-2026-05.md](docs/MIGRATION-2026-05.md)** -- May 2026 migration off the legacy fly.io prod data lake: cold R2 archive + warm `legacy.*` schema in tiger2go, plus the data-quality wins it surfaced (EPSS materialisation, provenance cohort backfill, DLQ FK fix)
 
 ## License
 

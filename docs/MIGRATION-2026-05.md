@@ -1,7 +1,7 @@
 # Migration: prod data lake → tiger2go (May 2026)
 
-**Status:** Phases 1–4 complete. Phase 5 (comparison views) pending.
-Phase 6 (optional re-enrichment) deferred.
+**Status:** Phases 1–5 complete. Phase 6 (optional re-enrichment)
+deferred.
 
 This document captures the migration off the legacy fly.io-hosted prod
 data lake — `tigerblue-db` on `metabrief-db` (Mike Harris / personal
@@ -139,7 +139,7 @@ choice on 2026-05-16.
 | 4b — Downstream-consumer audit | — | moot post-cutover |
 | 4c — Provenance cohort backfill | 2026-05-16 | tiger-eye [PR #38](https://github.com/miketigerblue/tiger-eye/pull/38) |
 | 4d — DLQ FK regression fix (bonus) | 2026-05-15/16 | tiger-eye [PR #37](https://github.com/miketigerblue/tiger-eye/pull/37) |
-| 5 — Comparison views | pending | — |
+| 5 — Comparison views | 2026-05-16 | tiger2go [PR #18](https://github.com/miketigerblue/tiger2go/pull/18) |
 | 6 — Optional history re-enrichment | deferred | — |
 
 ### Phase 2 — restore engineering notes
@@ -219,24 +219,34 @@ For any future write-up:
 
 ---
 
-## 8. Remaining work
+## 8. Phase 5 — comparison views (shipped 2026-05-16)
 
-### Phase 5 — comparison views
+Three views live in `public.*` on tiger2go, guarded by a
+schema-existence check so they're a no-op anywhere `legacy.*` isn't
+present (CI environments, fresh deployments). Migration:
+[`20260516120000_comparison_views_legacy_vs_public.sql`](https://github.com/miketigerblue/tiger2go/blob/main/migrations/20260516120000_comparison_views_legacy_vs_public.sql)
+([tiger2go PR #18](https://github.com/miketigerblue/tiger2go/pull/18)).
 
-Create three comparison views in tiger2go that demonstrate the
-migration's impact:
+- **`v_actor_normalisation_demo`** — one-row summary contrasting legacy
+  free-text `analysis.potential_threat_actors` JSON arrays with the new
+  `public.threat_actors` canonical entities + `analysis_actor` join
+  table. Reports a `noise_reduction_ratio` of **15.2×** (7,412 distinct
+  lowercased raw strings → 488 canonical entities).
+- **`v_kev_demotion`** — per-CVE side-by-side of `public.cve_kev` typed
+  columns vs the same fields trapped inside `legacy.cve_enriched.json`
+  where `source='CISA-KEV'`. Concretises losses such as
+  `knownRansomwareCampaignUse` stored as the string `"Unknown"` rather
+  than the typed boolean used now.
+- **`v_analysis_comparison`** — for each of the 1,608 GUIDs enriched by
+  *both* the v0.1.x (legacy) and v0.2.x (new) pipelines, joins the two
+  verdicts side-by-side: severity agreement, confidence delta,
+  threat-type categorisation (new-only), per-row provenance,
+  timestamps. Surfaces real model drift — e.g. "Global Crackdown
+  Arrests 276" was scored HIGH (confidence 75) by legacy but
+  INFORMATIONAL (confidence 18) by the new model, which correctly
+  identified the law-enforcement-news framing.
 
-- `v_analysis_comparison` — same `guid` enriched by legacy vs current
-  (relevant once we re-enrich; currently the corpora don't overlap by
-  guid since legacy ran Oct→May, new started Apr→ on different feeds)
-- `v_actor_normalisation_demo` — concrete before/after counts
-  (`legacy.analysis.potential_threat_actors` JSON vs
-  `public.threat_actors` canonical entities)
-- `v_kev_demotion` — `legacy.cve_enriched WHERE source='CISA-KEV'` vs
-  `public.cve_kev`, showing the fields lost in the old "source"
-  encoding
-
-### Phase 6 — optional re-enrichment (deferred)
+## 8a. Phase 6 — optional re-enrichment (deferred)
 
 Replay the 12,463 legacy entries through current tiger-eye for
 apples-to-apples comparison. Estimated cost: ~$15–50 in OpenAI usage
@@ -256,8 +266,8 @@ re-enrichment isn't urgent.
 | Restore script | [`scripts/restore_legacy.sh`](../scripts/restore_legacy.sh) |
 | EPSS materialiser | `tiger2go/migrations/20260516_materialize_epss_to_cve_enriched.sql` |
 | Provenance backfill | [`scripts/backfill_provenance_legacy_cohort.sql`](../scripts/backfill_provenance_legacy_cohort.sql) |
-| PRs (tiger-eye) | #37 (DLQ FK fix), #38 (provenance cohort) |
-| PRs (tiger2go) | #15/#16 (KEV ingest fields), #17 (EPSS materialisation) |
+| PRs (tiger-eye) | #37 (DLQ FK fix), #38 (provenance cohort), #39 (this doc) |
+| PRs (tiger2go) | #15/#16 (KEV ingest fields), #17 (EPSS materialisation), #18 (comparison views) |
 | CHANGELOG | [`CHANGELOG.md`](../CHANGELOG.md) `[Unreleased]` |
 
 ---

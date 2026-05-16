@@ -219,18 +219,21 @@ jobs:
           exit-code: "0"
 
       - name: Generate SBOM
+        # SPDX-JSON format so tiger-watch's /sbom/upload parser accepts it
+        # directly (the parser is SPDX-only). Once tiger-watch grows a
+        # CycloneDX parser we can switch back, or emit both.
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: "tiger-eye:ci"
-          format: "cyclonedx"
-          output: "sbom.json"
+          format: "spdx-json"
+          output: "sbom.spdx.json"
 
       - name: Upload SBOM
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sbom
-          path: sbom.json
+          path: sbom.spdx.json
 
   # ---------- Stage 5: DAST (against running container) ----------
 

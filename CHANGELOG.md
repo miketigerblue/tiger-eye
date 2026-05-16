@@ -90,7 +90,15 @@ Not yet tagged; will roll into `0.3.0` when ready.
 - #34 — feat(api): expose v0.2.0 analysis fields in detail drawer
 - #35 — feat(ui): priority badges + KEV/ransomware indicators + entity chips
 - #36 — chore(entities): pass-2 curation
-- _(this PR)_ — fix(loop): create pipeline_runs row before analyses persist
+- #37 — fix(loop): create pipeline_runs row before analyses persist
+- _(this PR)_ — chore(provenance): mark pre-PR22 analyses with `legacy-pre-pr22` cohort tag
+
+### Data-quality scripts
+- `scripts/backfill_provenance_legacy_cohort.sql` — one-shot: 2,410
+  pre-PR22 rows now carry `pipeline_version = prompt_version = 'legacy-pre-pr22'`
+  so cohort queries (`SELECT pipeline_version, COUNT(*) FROM analysis GROUP BY 1`)
+  cleanly separate v0.1.x output from v0.2.x. `model_id` and `input_hash`
+  remain NULL on legacy rows — those values are genuinely unrecoverable.
 
 ---
 

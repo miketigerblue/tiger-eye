@@ -10,7 +10,7 @@ pgvector>=0.3.0
 
 # LLM
 langchain-openai>=1.2.1
-openai>=2.32.0
+openai>=2.37.0
 
 # Observability — structured logging
 structlog>=24.0.0

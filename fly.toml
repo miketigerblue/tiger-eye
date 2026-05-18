@@ -1,0 +1,46 @@
+# fly.toml — tiger-eye
+#
+# Python LLM enrichment pipeline. Listens on Postgres NOTIFY
+# (`article_ingested`) and writes structured analysis + pgvector
+# embeddings. Dual-mode: a FastAPI server on 8080 (health, internal
+# endpoints) + a background asyncio enrichment loop in the same process.
+#
+# Secrets (set via `fly secrets set -a tiger-eye …`):
+#   DATABASE_URL         postgresql+asyncpg://fly-user:…@pgbouncer.<id>.flympg.net/fly-db
+#   OPENAI_API_KEY       LLM enrichment + embedding
+#   TIGER_WATCH_URL      http://tiger-watch.internal:8081 (sibling-app SBOM service)
+
+app             = "tiger-eye"
+primary_region  = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  EMBEDDING_MODEL      = "text-embedding-3-small"
+  EMBEDDING_DIMENSIONS = "1536"
+
+[http_service]
+  internal_port       = 8080
+  force_https         = true
+  auto_stop_machines  = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+
+[[http_service.checks]]
+  grace_period = "15s"
+  interval     = "30s"
+  method       = "get"
+  path         = "/health"
+  protocol     = "http"
+  timeout      = "5s"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus     = 1
+  # Embedding + LLM batching benefits from more RAM than the default.
+  memory   = "1gb"
+
+[metrics]
+  port = 8080
+  path = "/metrics/"   # trailing slash — prometheus_client ASGI mount 307-redirects otherwise

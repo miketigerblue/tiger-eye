@@ -65,6 +65,33 @@ tracer = get_tracer()
 CVE_PATTERN = re.compile(r"CVE-\d{4}-\d{4,7}")
 
 
+# Some RSS feeds set generic / branding-light <channel><title> values that
+# make analysis.source_name useless for grouping (e.g. NCSC publishes its
+# all-feed under <title>All Feed</title>; CERT-EU under "Latest publications
+# of type Threat Intelligence"). Keyed on feed_url so the override survives
+# upstream title-text changes.
+SOURCE_NAME_OVERRIDES: dict[str, str] = {
+    "https://www.ncsc.gov.uk/api/1/services/v1/all-rss-feed.xml": "UK NCSC",
+    "https://cert.europa.eu/publications/threat-intelligence-rss": "CERT-EU",
+    "https://wid.cert-bund.de/content/public/securityAdvisory/rss": "CERT-Bund",
+    "https://www.cert.ssi.gouv.fr/feed/": "CERT-FR (ANSSI)",
+    "https://feeds.feedburner.com/GoogleOnlineSecurityBlog": "Google Security Blog",
+    "https://sec.cloudapps.cisco.com/security/center/psirtrss20/CiscoSecurityAdvisories.xml": "Cisco PSIRT",
+    # Mandiant's blog now lives on Google Cloud with a generic
+    # <title>Threat Intelligence</title>; force the brand-stable label.
+    "https://cloudblog.withgoogle.com/topics/threat-intelligence/rss/": "Mandiant",
+    "https://api.msrc.microsoft.com/update-guide/rss": "Microsoft MSRC",
+}
+
+
+def _resolve_source_name(feed_url: str | None, feed_title: str | None) -> str | None:
+    """Pick the source label we want surfaced on analysis rows. Override map
+    wins; otherwise fall back to the RSS channel title."""
+    if feed_url and feed_url in SOURCE_NAME_OVERRIDES:
+        return SOURCE_NAME_OVERRIDES[feed_url]
+    return feed_title
+
+
 async def _link_entities(db, analysis_id: uuid.UUID, raw_actors: list, raw_families: list) -> None:
     """Canonicalise actor + malware mentions and upsert entity + join rows.
 
@@ -968,7 +995,7 @@ async def analyse_and_persist(
             malware_families=result.get("malware_families"),
             target_geographies=result.get("target_geographies"),
             entry_title=entry.title,
-            source_name=entry.feed_title,
+            source_name=_resolve_source_name(entry.feed_url, entry.feed_title),
             source_url=entry.link,
             feed_title=entry.feed_title,
             feed_description=entry.feed_description,

@@ -237,18 +237,20 @@ jobs:
 
       - name: Publish SBOM to tiger-watch
         # Main-branch pushes only: PR builds (incl. forks) must not write
-        # to the lake. NB /sbom/upload is currently unauthenticated —
-        # revisit this step when tiger-watch grows an API key.
+        # to the lake. Auth: X-API-Key checked against tiger-watch's
+        # SBOM_UPLOAD_API_KEY fly secret.
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           curl -sf --retry 3 --retry-delay 5 -X POST \
             "${TIGER_WATCH_URL}/sbom/upload" \
+            -H "X-API-Key: ${TIGER_WATCH_API_KEY}" \
             -F "file=@sbom.spdx.json" \
             -F "vendor=tigerblue" \
             -F "device_type=container:tiger-eye" \
             -F "notes=CI ${GITHUB_SHA} run ${GITHUB_RUN_ID}"
         env:
           TIGER_WATCH_URL: ${{ vars.TIGER_WATCH_URL || 'https://tiger-watch.fly.dev' }}
+          TIGER_WATCH_API_KEY: ${{ secrets.TIGER_WATCH_API_KEY }}
 
   # ---------- Stage 5: DAST (against running container) ----------
 

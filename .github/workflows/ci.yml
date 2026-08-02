@@ -104,6 +104,11 @@ jobs:
   secret-scan:
     name: Secret Scanning (Gitleaks)
     runs-on: ubuntu-latest
+    # gitleaks-action lists PR commits via the API on pull_request events;
+    # workflow-level contents:read alone 403s (hit on tiger-watch#1).
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:

@@ -16,7 +16,7 @@ openai>=2.45.0
 structlog>=25.5.0
 
 # Observability — Prometheus metrics
-prometheus-client>=0.25.0
+prometheus-client>=0.26.0
 
 # Observability — OpenTelemetry tracing
 opentelemetry-api>=1.43.0

@@ -20,7 +20,7 @@ jobs:
     name: Lint (Ruff + mypy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -37,7 +37,7 @@ jobs:
     name: SAST (Bandit + Semgrep)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
@@ -79,7 +79,7 @@ jobs:
     name: Dependency Audit (pip-audit)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -110,7 +110,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Gitleaks
@@ -125,7 +125,7 @@ jobs:
     needs: [lint]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -168,7 +168,7 @@ jobs:
           --health-timeout=5s
           --health-retries=10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -194,7 +194,7 @@ jobs:
     needs: [unit-tests]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build image
         run: docker build -t tiger-eye:ci .
@@ -278,7 +278,7 @@ jobs:
           --health-timeout=5s
           --health-retries=10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:

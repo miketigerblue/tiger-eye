@@ -86,8 +86,15 @@ jobs:
       - name: Install dependencies
         # Upgrade pip first — CVE-2026-3219 / CVE-2026-6357 in pip <26.1
         # would otherwise be flagged by pip-audit's own self-scan.
+        #
+        # setuptools for the same reason, and it is the same class of
+        # problem: not a declared dependency, only a build requirement in
+        # pyproject.toml, but pip-audit scans the whole installed
+        # environment and the runner ships 79.0.1, which carries
+        # PYSEC-2026-3447 (fixed in 83.0.0). This is what had CI red since
+        # 2026-08-02 — nothing in requirements.txt was ever at fault.
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip setuptools
           pip install -r requirements.txt
       - name: pip-audit
         run: |

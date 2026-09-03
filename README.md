@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/miketigerblue/tiger-eye/actions/workflows/ci.yml"><img src="https://github.com/miketigerblue/tiger-eye/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
-  <img src="https://img.shields.io/badge/python-3.11-blue.svg" alt="Python 3.11">
+  <img src="https://img.shields.io/badge/python-3.14-blue.svg" alt="Python 3.14">
   <img src="https://img.shields.io/badge/pgvector-HNSW-green.svg" alt="pgvector">
 </p>
 

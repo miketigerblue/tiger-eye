@@ -665,7 +665,7 @@ Noisy third-party loggers (`httpcore`, `httpx`, `openai`) are suppressed to WARN
 tiger2go stack (docker-compose)          tiger-eye stack (docker-compose)
 +------------------------------------+   +---------------------------+
 | db         (pgvector/pgvector:pg16)|   | tiger-eye                 |
-| tigerfetch (Go binary)            |   |   (python:3.11-slim)     |
+| tigerfetch (Go binary)            |   |   (python:3.14-slim)     |
 | prometheus (prom/prometheus)      |   |   joins tiger2go_net     |
 | grafana    (grafana/grafana)      |   |   port: 8080             |
 +------------------------------------+   +---------------------------+
@@ -679,7 +679,7 @@ Tiger-eye is deployed to **Fly.io Amsterdam (ams)** region, connecting to a mana
 ### 11.3 Container build
 
 ```dockerfile
-FROM python:3.11-slim
+FROM python:3.14-slim
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \

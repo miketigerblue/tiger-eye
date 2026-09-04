@@ -364,6 +364,18 @@
         color: #ff7d7d;
         border-color: rgba(255, 70, 70, 0.40);
     }
+    /* NVD SSVC "poc" — public proof-of-concept, not (yet) on KEV */
+    .kev-pill.poc {
+        background: rgba(255, 210, 80, 0.12);
+        color: #ffd36a;
+        border-color: rgba(255, 210, 80, 0.32);
+    }
+    /* NVD vuln_status = Rejected — the ID is withdrawn, rank it last */
+    .kev-pill.rejected {
+        background: rgba(160, 160, 180, 0.10);
+        color: var(--text-dim);
+        border-color: rgba(160, 160, 180, 0.22);
+    }
 
     /* Entity badges (actor / malware) — category + country flag */
     .entity-chip {
@@ -1258,7 +1270,10 @@ function prioTooltip(c, prio) {
     if (c.kev_listed)      parts.push('on CISA KEV');
     if (c.kev_ransomware)  parts.push('known ransomware use');
     if (c.epss != null)    parts.push('EPSS ' + (Number(c.epss) * 100).toFixed(1) + '%');
-    if (c.cvss != null)    parts.push('CVSS ' + Number(c.cvss).toFixed(1));
+    if (c.cvss != null)    parts.push('CVSS ' + cvssText(c));
+    if (c.ssvc_exploitation === 'active') parts.push('SSVC: active exploitation');
+    if (c.ssvc_exploitation === 'poc')    parts.push('SSVC: public PoC');
+    if (c.vuln_status === 'Rejected')     parts.push('rejected by NVD');
     return prio + (parts.length ? ' — ' + parts.join(' · ') : '');
 }
 
@@ -1270,23 +1285,38 @@ function flagFor(iso) {
 }
 
 /**
- * Compute priority tier from the fused signal (CVSS × EPSS × KEV × ransomware).
+ * Compute priority tier from the fused signal (CVSS × EPSS × KEV × SSVC × ransomware).
  * Cheap, idempotent, runs on every render.
  *
  *   P0: KEV-listed AND (EPSS≥50% OR ransomware-known)   — patch yesterday
- *   P1: KEV OR EPSS≥50% OR (CVSS≥9 AND EPSS≥10%)        — this week
- *   P2: CVSS≥7 OR EPSS≥5%                                — this sprint
- *   P3: everything else                                   — backlog
+ *   P1: KEV OR SSVC active OR EPSS≥50% OR (CVSS≥9 AND EPSS≥10%) — this week
+ *   P2: CVSS≥7 OR EPSS≥5% OR SSVC poc                    — this sprint
+ *   P3: everything else, and anything NVD has Rejected    — backlog
+ *
+ * cvss_base is not on one scale: cve_enriched carries v2.0 scores where NVD
+ * never issued a v3/v4 metric. v2 has no "critical" band, so a v2 score
+ * can reach P2 on its own but never P1 — the CVSS≥9 rule is v3/v4 only.
  */
 function priorityFor(c) {
+    if (c.vuln_status === 'Rejected') return 'P3';
     const ransom = c.kev_ransomware === true;
     const kev    = c.kev_listed === true;
     const epss   = Number(c.epss || 0);   // 0..1
     const cvss   = Number(c.cvss || 0);   // 0..10
-    if (kev && (epss >= 0.5 || ransom))                return 'P0';
-    if (kev || epss >= 0.5 || (cvss >= 9 && epss >= 0.1)) return 'P1';
-    if (cvss >= 7 || epss >= 0.05)                     return 'P2';
+    const v2     = String(c.cvss_version || '').startsWith('2');
+    const ssvc   = c.ssvc_exploitation || '';
+    if (kev && (epss >= 0.5 || ransom))                          return 'P0';
+    if (kev || ssvc === 'active' || epss >= 0.5 || (!v2 && cvss >= 9 && epss >= 0.1)) return 'P1';
+    if (cvss >= 7 || epss >= 0.05 || ssvc === 'poc')             return 'P2';
     return 'P3';
+}
+
+/** "7.5" for v3.x, "7.5 v2" / "7.5 v4" when the score is on another scale. */
+function cvssText(c) {
+    if (c.cvss === null || c.cvss === undefined) return null;
+    const v = String(c.cvss_version || '');
+    const tag = v && !v.startsWith('3') ? ' v' + v.replace(/\.0$/, '') : '';
+    return Number(c.cvss).toFixed(1) + tag;
 }
 
 function renderCVEs() {
@@ -1307,13 +1337,15 @@ function renderCVEs() {
         const prio = c.priority;
         const kevPill   = c.kev_listed ? '<span class="kev-pill">KEV</span>' : '';
         const ransomPill = c.kev_ransomware ? '<span class="kev-pill ransom" title="Known ransomware-actor use">RANSOM</span>' : '';
+        const pocPill    = (!c.kev_listed && c.ssvc_exploitation === 'poc') ? '<span class="kev-pill poc" title="NVD SSVC: public proof-of-concept exploit">POC</span>' : '';
+        const rejPill    = c.vuln_status === 'Rejected' ? '<span class="kev-pill rejected" title="Rejected by NVD">REJECTED</span>' : '';
         return `
         <tr tabindex="0" data-id="${escapeHTML(c.analysis_id || '')}" role="button" aria-label="Open ${escapeHTML(c.cve_id)} detail (priority ${prio})">
             <td><span class="prio ${prio}" title="${prioTooltip(c, prio)}">${prio}</span></td>
-            <td class="cve-id">${escapeHTML(c.cve_id)}${kevPill}${ransomPill}</td>
+            <td class="cve-id">${escapeHTML(c.cve_id)}${kevPill}${ransomPill}${pocPill}${rejPill}</td>
             <td><span class="sev ${escapeHTML(c.sev || 'INFORMATIONAL')}">${escapeHTML(c.sev || '—')}</span></td>
             <td class="num">${c.epss !== null && c.epss !== undefined ? Number(c.epss).toFixed(3) : '—'}</td>
-            <td class="num">${c.cvss !== null && c.cvss !== undefined ? Number(c.cvss).toFixed(1) : '—'}</td>
+            <td class="num">${cvssText(c) ?? '—'}</td>
             <td class="bar-cell"><div class="mini-bar"><span style="width:${((c.epss || 0) * 100).toFixed(1)}%"></span></div></td>
             <td class="num">${c.mentions}</td>
             <td style="color:var(--text-dim);font-size:11px">${escapeHTML(c.primary_source || '—')}${c.n_sources > 1 ? ` <span style="color:var(--text-faint)">+${c.n_sources-1}</span>` : ''}</td>
@@ -1554,12 +1586,14 @@ function renderDrawer(r) {
             arr(r.cves_enriched).map(c => {
                 const prio = priorityFor(c);
                 const epssTxt = (c.epss != null) ? ' · EPSS ' + (Number(c.epss) * 100).toFixed(0) + '%' : '';
-                const cvssTxt = (c.cvss != null) ? ' · CVSS ' + Number(c.cvss).toFixed(1) : '';
+                const cvssTxt = (c.cvss != null) ? ' · CVSS ' + cvssText(c) : '';
                 const kevTxt  = c.kev_listed ? ' · <span style="color:#ffb072">KEV</span>' : '';
+                const pocTxt  = (!c.kev_listed && c.ssvc_exploitation === 'poc') ? ' · <span style="color:#ffb072" title="NVD SSVC: public proof-of-concept exploit">PoC</span>' : '';
+                const rejTxt  = c.vuln_status === 'Rejected' ? ' · <span style="color:var(--text-dim)">rejected</span>' : '';
                 const rwTxt   = c.kev_ransomware ? ' · <span style="color:#ff7d7d" title="Known ransomware use">🩸 ransom</span>' : '';
                 return `<span class="tag accent" title="${prioTooltip(c, prio)}">
                     <span class="prio ${prio}" style="margin-right:6px">${prio}</span>
-                    ${escapeHTML(c.cve_id)}${cvssTxt}${epssTxt}${kevTxt}${rwTxt}
+                    ${escapeHTML(c.cve_id)}${cvssTxt}${epssTxt}${kevTxt}${pocTxt}${rwTxt}${rejTxt}
                 </span>`;
             }).join('')
         }</div>`));

@@ -131,6 +131,18 @@ class CveEnriched(Base):
     cvss_base: Mapped[float | None] = mapped_column(Numeric)
     epss: Mapped[float | None] = mapped_column(Numeric)
     modified: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # NVD capture expansion (tigerfetch, 2026-08). cvss_base may be a v2.0 or
+    # v4.0 score where NVD never issued a v3 metric — always read it with
+    # cvss_version. published / vuln_status / source_identifier / cve_tags are
+    # only populated for records captured after the expansion.
+    published: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    vuln_status: Mapped[str | None] = mapped_column(Text)
+    source_identifier: Mapped[str | None] = mapped_column(Text)
+    cve_tags: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    cvss_version: Mapped[str | None] = mapped_column(Text)
+    ssvc_exploitation: Mapped[str | None] = mapped_column(Text)
+    ssvc_automatable: Mapped[str | None] = mapped_column(Text)
+    ssvc_technical_impact: Mapped[str | None] = mapped_column(Text)
 
 
 class CveKev(Base):

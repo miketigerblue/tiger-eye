@@ -11,6 +11,7 @@ import re
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from langchain_openai import ChatOpenAI
 from sqlalchemy import text as sql_text
@@ -707,7 +708,14 @@ def _build_llm() -> ChatOpenAI:
 
 
 async def lookup_cve_context(text: str) -> str:
-    """Extract CVE IDs from text and fetch CVSS/EPSS scores from cve_enriched."""
+    """Extract CVE IDs from text and fetch NVD context from cve_enriched.
+
+    One line per CVE: CVSS with its version family (v2.0 / v3.x / v4.0 are
+    not on the same scale, so the model must know which it is looking at),
+    EPSS, SSVC exploitation (active / poc / none), NVD status (Rejected,
+    Deferred, ...), KEV membership and publication date. Fields that are
+    NULL in the lake are omitted rather than printed as None.
+    """
     cve_ids = list(set(CVE_PATTERN.findall(text or "")))
     if not cve_ids:
         return ""
@@ -715,9 +723,20 @@ async def lookup_cve_context(text: str) -> str:
     async with get_db() as db:
         result = await db.execute(
             sql_text("""
-                SELECT cve_id, cvss_base, epss
-                FROM cve_enriched
-                WHERE cve_id = ANY(:ids)
+                SELECT ce.cve_id,
+                       ce.cvss_base,
+                       ce.cvss_version,
+                       ce.epss,
+                       ce.ssvc_exploitation,
+                       ce.vuln_status,
+                       ce.published,
+                       (kv.cve_id IS NOT NULL) AS kev_listed
+                FROM cve_enriched ce
+                LEFT JOIN cve_kev kv ON kv.cve_id = ce.cve_id AND kv.withdrawn_at IS NULL
+                WHERE ce.cve_id = ANY(:ids)
+                  AND ce.source = 'NVD'
+                ORDER BY ce.cve_id
+                LIMIT 50
             """),
             {"ids": cve_ids},
         )
@@ -728,10 +747,29 @@ async def lookup_cve_context(text: str) -> str:
 
     lines = ["== NVD Vulnerability Context =="]
     for row in rows:
-        cvss = f"CVSS={row.cvss_base}" if row.cvss_base else "CVSS=N/A"
-        epss = f"EPSS={row.epss}" if row.epss else "EPSS=N/A"
-        lines.append(f"  {row.cve_id}: {cvss}, {epss}")
+        lines.append(f"  {row.cve_id}: {_format_cve_context_row(row)}")
     return "\n".join(lines)
+
+
+def _format_cve_context_row(row: Any) -> str:
+    """Render one cve_enriched row as a compact, NULL-safe key=value line."""
+    parts: list[str] = []
+    if row.cvss_base is not None:
+        version = f" (v{row.cvss_version})" if getattr(row, "cvss_version", None) else ""
+        parts.append(f"CVSS={row.cvss_base}{version}")
+    else:
+        parts.append("CVSS=N/A")
+    parts.append(f"EPSS={row.epss}" if row.epss is not None else "EPSS=N/A")
+    if getattr(row, "ssvc_exploitation", None):
+        parts.append(f"exploitation={row.ssvc_exploitation}")
+    if getattr(row, "vuln_status", None):
+        parts.append(f"status={row.vuln_status}")
+    if getattr(row, "kev_listed", False):
+        parts.append("kev=yes")
+    published = getattr(row, "published", None)
+    if published:
+        parts.append(f"published={published.date().isoformat() if hasattr(published, 'date') else published}")
+    return ", ".join(parts)
 
 
 def normalise_analysis(result: dict) -> dict:

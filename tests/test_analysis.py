@@ -1,8 +1,9 @@
 """Unit tests for analysis normalisation and embedding text construction."""
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
-from tiger_eye.analysis import normalise_analysis
+from tiger_eye.analysis import _format_cve_context_row, normalise_analysis
 from tiger_eye.embedding import build_embedding_text
 
 
@@ -237,3 +238,55 @@ def test_build_embedding_text_handles_empty_fields():
     assert "Title: Minimal Entry" in text
     assert "Threat Type: " in text
     assert "Severity: " in text
+
+
+# ---------------------------------------------------------------------------
+# lookup_cve_context — one line per CVE, NULL-safe
+# ---------------------------------------------------------------------------
+
+
+def _cve_row(**kwargs):
+    defaults = {
+        "cve_id": "CVE-2024-3400",
+        "cvss_base": None,
+        "cvss_version": None,
+        "epss": None,
+        "ssvc_exploitation": None,
+        "vuln_status": None,
+        "published": None,
+        "kev_listed": False,
+    }
+    defaults.update(kwargs)
+    return SimpleNamespace(**defaults)
+
+
+def test_cve_context_row_carries_version_and_signals():
+    row = _cve_row(
+        cvss_base=10.0,
+        cvss_version="3.1",
+        epss=0.94,
+        ssvc_exploitation="active",
+        vuln_status="Analyzed",
+        published=datetime(2024, 4, 12, tzinfo=UTC),
+        kev_listed=True,
+    )
+    line = _format_cve_context_row(row)
+    assert line == "CVSS=10.0 (v3.1), EPSS=0.94, exploitation=active, status=Analyzed, kev=yes, published=2024-04-12"
+
+
+def test_cve_context_row_v2_score_is_labelled():
+    # cvss_base can be a v2.0 score where NVD never issued v3 — the model must
+    # be told, because v2 and v3 are not on the same scale.
+    line = _format_cve_context_row(_cve_row(cvss_base=6.8, cvss_version="2.0", epss=0.22))
+    assert line == "CVSS=6.8 (v2.0), EPSS=0.22"
+
+
+def test_cve_context_row_omits_nulls_and_keeps_zero():
+    # 0.0 is a real score, not "missing"; NULL fields are left out entirely.
+    line = _format_cve_context_row(_cve_row(cvss_base=0.0, cvss_version="3.1"))
+    assert line == "CVSS=0.0 (v3.1), EPSS=N/A"
+    assert "None" not in line
+
+
+def test_cve_context_row_all_null():
+    assert _format_cve_context_row(_cve_row()) == "CVSS=N/A, EPSS=N/A"

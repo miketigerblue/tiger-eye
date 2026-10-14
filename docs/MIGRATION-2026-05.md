@@ -3,6 +3,8 @@
 **Status:** Phases 1–5 complete. Phase 6 (optional re-enrichment)
 deferred.
 
+For a concise account of the decisions and outcomes, see [Migrating a threat intelligence lake without losing its history](https://github.com/miketigerblue/miketigerblue/blob/main/evidence/2026-05-lake-migration.md). Interpretation notes below were clarified on 14 October 2026; the historical measurements remain dated to May.
+
 This document captures the migration off the legacy fly.io-hosted prod
 data lake — `tigerblue-db` on `metabrief-db` (Mike Harris / personal
 org) — onto the local Go-based **tiger2go** stack. It pairs with the
@@ -133,7 +135,7 @@ choice on 2026-05-16.
 | Phase | Date | PR / Artefact |
 |---|---|---|
 | 1 — `pg_dump` + push to R2 + checksum | 2026-05-14 | R2 archive (above) |
-| 2 — Restore as `legacy.*` in tiger2go | 2026-05-14/15 | [`scripts/restore_legacy.sh`](../scripts/restore_legacy.sh) |
+| 2 — Restore as `legacy.*` in tiger2go | 2026-05-14/15 | `scripts/restore_legacy.sh` (local migration script; not included in this repository) |
 | 3 — Destroy fly.io postgres | 2026-05-16 | (manual via `fly` CLI) |
 | 4a — EPSS materialisation | 2026-05-16 | tiger2go [PR #17](https://github.com/miketigerblue/tiger2go/pull/17) |
 | 4b — Downstream-consumer audit | — | moot post-cutover |
@@ -144,8 +146,9 @@ choice on 2026-05-16.
 
 ### Phase 2 — restore engineering notes
 
-The restore was non-trivial. Sequence of issues encountered (all
-documented in [`scripts/restore_legacy.sh`](../scripts/restore_legacy.sh)):
+The restore encountered the following issues. The execution notes refer to
+`scripts/restore_legacy.sh`, a local migration script not included in this
+repository.
 
 1. Container's psql 16.13 couldn't read PG-17.4 dump format (1.16) →
    used host's pg_restore 17.4 against container's exposed 5432.
@@ -171,8 +174,11 @@ documented in [`scripts/restore_legacy.sh`](../scripts/restore_legacy.sh)):
 7. `transaction_timeout` is a PG-17-only session param — stripped
    from the dump stream.
 
-End state: bit-perfect restore, 24 minutes wall-clock through a
-pg_dump → Python → psql pipeline.
+End state: historical threat-intelligence data restored into the separate
+legacy schema, with 24 minutes recorded through the pg_dump → Python → psql
+pipeline. The archive checksum verifies archived bytes; it does not establish
+byte-for-byte identity of the transformed database or validate downstream
+consumer behaviour.
 
 ---
 
@@ -184,8 +190,10 @@ side-by-side comparison made them obvious:
 | Issue | Before | After | Fix |
 |---|---|---|---|
 | `cve_enriched.epss` populated | 0 / 351,080 (0%) | 333,455 / 351,080 (95%) | tiger2go PR #17 — `materialize_epss_to_cve_enriched()` function |
-| Analyses with provenance | 60 / 2,503 (2.4%) | 2,503 / 2,503 (100%, with `legacy-pre-pr22` cohort tag for old rows) | tiger-eye PR #38 — cohort backfill |
+| Analyses assigned a prompt/pipeline cohort | 2,410 older rows lacked cohort tags | 2,503 / 2,503 assigned a cohort; 2,410 tagged `legacy-pre-pr22` | tiger-eye PR #38 — cohort backfill; unknown model IDs and input hashes remain NULL |
 | Enrichment loop alive | 0 of 153 cycles succeeding (FK violation) | back to green | tiger-eye PR #37 — split `pipeline_runs` insert into create/finalize |
+
+The cohort backfill did not recover complete provenance. [PR #38](https://github.com/miketigerblue/tiger-eye/pull/38) and the [backfill SQL](../scripts/backfill_provenance_legacy_cohort.sql) explicitly leave unknown `model_id` and `input_hash` values NULL. The legacy cohort marker supports grouping; it is not the original prompt version.
 
 ---
 
@@ -206,7 +214,8 @@ For any future write-up:
     JSON arrays. Zero categorisation, zero country attribution.
   - New: **484 canonical entities** in `public.threat_actors` after
     aliasing + denylist + curation. 30 categorised, 19 with country.
-  - 15× reduction in entity proliferation per article.
+  - These totals compare different corpora and representations; the ratio is
+    not a measured reduction in false positives or a per-article accuracy metric.
 - **Pipeline cost attribution**: prod had zero. New stack tracks
   per-row `prompt_tokens` / `response_tokens` / `latency_ms` and
   per-batch totals in `pipeline_runs`. Future LLM-cost reporting
@@ -231,7 +240,9 @@ present (CI environments, fresh deployments). Migration:
   free-text `analysis.potential_threat_actors` JSON arrays with the new
   `public.threat_actors` canonical entities + `analysis_actor` join
   table. Reports a `noise_reduction_ratio` of **15.2×** (7,412 distinct
-  lowercased raw strings → 488 canonical entities).
+  lowercased raw strings / 488 canonical entities). The view's field name
+  describes that arithmetic ratio; it does not measure noise removal on a
+  matched set of articles.
 - **`v_kev_demotion`** — per-CVE side-by-side of `public.cve_kev` typed
   columns vs the same fields trapped inside `legacy.cve_enriched.json`
   where `source='CISA-KEV'`. Concretises losses such as
@@ -241,10 +252,11 @@ present (CI environments, fresh deployments). Migration:
   *both* the v0.1.x (legacy) and v0.2.x (new) pipelines, joins the two
   verdicts side-by-side: severity agreement, confidence delta,
   threat-type categorisation (new-only), per-row provenance,
-  timestamps. Surfaces real model drift — e.g. "Global Crackdown
+  timestamps. Surfaces output differences — e.g. "Global Crackdown
   Arrests 276" was scored HIGH (confidence 75) by legacy but
-  INFORMATIONAL (confidence 18) by the new model, which correctly
-  identified the law-enforcement-news framing.
+  INFORMATIONAL (confidence 18) by the new model. This is a reviewable
+  output difference, not a controlled accuracy result; models, prompts,
+  retrieval context and analysis times may all differ.
 
 ## 8a. Phase 6 — optional re-enrichment (deferred)
 
@@ -263,7 +275,7 @@ re-enrichment isn't urgent.
 |---|---|
 | Cold archive | `osint-r2:tigerblue-archive/tigerblue-prod-20260514T211257Z.tar.zst` |
 | Local warm copy | `tiger2go_postgres.tiger2go` schema `legacy.*` |
-| Restore script | [`scripts/restore_legacy.sh`](../scripts/restore_legacy.sh) |
+| Restore script | `scripts/restore_legacy.sh` (local migration script; not included in this repository) |
 | EPSS materialiser | `tiger2go/migrations/20260516_materialize_epss_to_cve_enriched.sql` |
 | Provenance backfill | [`scripts/backfill_provenance_legacy_cohort.sql`](../scripts/backfill_provenance_legacy_cohort.sql) |
 | PRs (tiger-eye) | #37 (DLQ FK fix), #38 (provenance cohort), #39 (this doc) |

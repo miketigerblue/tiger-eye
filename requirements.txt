@@ -6,7 +6,7 @@ pydantic-settings>=2.14.2
 # Database
 sqlalchemy[asyncio]>=2.0.51
 asyncpg>=0.31.0
-pgvector>=0.5.0
+pgvector>=0.5.1
 
 # LLM
 langchain-openai>=1.4.1

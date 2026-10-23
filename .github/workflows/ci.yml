@@ -204,7 +204,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Build image
-        run: docker build -t tiger-eye:ci .
+        run: docker build --pull -t tiger-eye:ci .
 
       - name: Trivy vulnerability scan
         uses: aquasecurity/trivy-action@master

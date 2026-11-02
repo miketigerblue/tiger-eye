@@ -33,4 +33,4 @@ python-dotenv>=1.2.2
 urllib3>=2.8.0        # GHSA-8988-9cw3-xx77, GHSA-vxq7-64xx-v4gw, GHSA-gh4c-6fx4-qh6g
 setuptools>=83.0.0    # GHSA-5rjg-fvgr-3xxf (CVE-2025-47273), GHSA-h35f-9h28-mq5c
 msgpack>=1.2.1        # GHSA-6v7p-g79w-8964 (CVE-2026-57585)
-certifi>=2026.10.19   # GHSA-6q48-6c7w-9gw2 (compromised emSign intermediates)
+certifi>=2026.10.23   # GHSA-6q48-6c7w-9gw2 (compromised emSign intermediates)
